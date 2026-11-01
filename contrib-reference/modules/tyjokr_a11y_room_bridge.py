@@ -6,13 +6,18 @@ _original_room_parts = None
 _original_wall_parts = None
 _cache_at = 0.0
 _cache = {}
+_cache_zone = None
 
 def _log(message):
     try: speech.log_line("room bridge: " + message)
     except Exception: pass
 
 def _room_map(refresh=False):
-    global _cache_at, _cache
+    global _cache_at, _cache, _cache_zone
+    import services
+    zone = services.current_zone_id()
+    if zone != _cache_zone:
+        _cache, _cache_at, _cache_zone = {}, 0.0, zone
     now = time.monotonic()
     if refresh or now - _cache_at > 2.0:
         try:
@@ -43,10 +48,10 @@ def _room_parts(frame):
         if name: parts = [grid._text("Entering {}. ", "Wchodzisz do: {}. ").format(name)]
     return parts, facts
 
-def _wall_parts(frame, all_sides=False):
+def _wall_parts(frame, all_sides=False, objects=None):
     import tyjokr_a11y_grid as grid
     import tyjokr_a11y_tiles as tiles
-    parts = list(_original_wall_parts(frame, all_sides=all_sides))
+    parts = list(_original_wall_parts(frame, all_sides=all_sides, objects=objects))
     if all_sides: return parts
     i, j = grid._tile
     sides, doors, names = tiles.walls(frame, i, j, grid._level), tiles.doors(frame, i, j, grid._level), _room_map()

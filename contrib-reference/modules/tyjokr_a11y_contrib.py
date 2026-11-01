@@ -300,12 +300,18 @@ def _move_key():
         if int(getattr(obj, "level", level)) != int(level):
             raise RuntimeError("object stayed on another floor")
     except Exception as ex:
+        restored = False
         try:
             obj.move_to(translation=old_position, orientation=old_orientation, routing_surface=old_surface)
-        except Exception:
-            pass
+            restored = True
+        except Exception as rollback_error:
+            _log("move rollback failed: {!r}".format(rollback_error))
         _log("move failed for {}: {!r}".format(_move["obj_id"], ex))
-        place._say_text("The object could not be moved; its original position was kept.", "Nie udalo sie przesunac obiektu; zachowano jego pierwotne polozenie.")
+        if restored:
+            place._say_text("The object could not be moved; its original position was restored.", "Nie udalo sie przesunac obiektu; przywrocono pierwotne polozenie.")
+        else:
+            _clear_move()
+            place._say_text("The move failed and its original position could not be restored. Check the object before continuing.", "Przesuniecie i przywrocenie polozenia nie powiodlo sie. Sprawdz obiekt przed kontynuowaniem.")
         return False
     _clear_move()
     place._say_text("{} moved.".format(name), "Przesunieto {}.".format(name))
@@ -433,10 +439,6 @@ def install():
         import tyjokr_a11y_layers
     except Exception as ex:
         _log("surface-layer focus did not load: {!r}".format(ex))
-    try:
-        import tyjokr_a11y_chair_alignment
-    except Exception as ex:
-        _log("chair alignment hints did not load: {!r}".format(ex))
     try:
         import tyjokr_a11y_chair_alignment
     except Exception as ex:

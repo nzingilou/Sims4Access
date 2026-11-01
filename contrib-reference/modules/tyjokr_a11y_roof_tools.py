@@ -16,12 +16,17 @@ def _rooms():
     return rooms.scan_rooms()
 
 def _box(room):
-    xs = [int(round(t[0])) for t in room.tiles]
-    zs = [int(round(t[1])) for t in room.tiles]
-    return min(xs), min(zs), max(xs) + 1, max(zs) + 1
+    import tyjokr_a11y_plus_build as build
+    return build._room_box(room)
+
+def _room_cells(room):
+    import tyjokr_a11y_plus_build as build
+    frame = build.frame()
+    return set((math.floor(e), math.floor(n))
+               for e, n in (frame.local(x, z) for x, z in room.tiles))
 
 def _shape(room):
-    cells = set((int(round(x)), int(round(z))) for x, z in room.tiles)
+    cells = _room_cells(room)
     x1, z1, x2, z2 = _box(room)
     width, depth = x2 - x1, z2 - z1
     if len(cells) == width * depth:
@@ -69,7 +74,7 @@ def describe_lot():
     import tyjokr_a11y_plus_build as build
     import tyjokr_a11y_tiles as tiles
     rooms, frame = _rooms(), build.frame()
-    all_cells = set((int(round(x)),int(round(z))) for r in rooms for x,z in r.tiles)
+    all_cells = set().union(*(_room_cells(r) for r in rooms)) if rooms else set()
     buildings = _components(all_cells)
     parts = ["Lot {} by {} metres.".format(frame.width, frame.depth)]
     for number, cells in enumerate(buildings, 1):
@@ -98,7 +103,7 @@ def describe_lot():
             if obj.is_sim: continue
             tags=" ".join(__import__('tyjokr_a11y_plus_rooms').tag_names(obj)).lower()
             if any(w in tags for w in ("plant","flower","shrub","tree","garden")):
-                plants.append(frame.tile_of(obj.position.x,obj.position.z))
+                plants.append(frame.local(obj.position.x,obj.position.z))
         except Exception: pass
     if plants:
         xs,zs=[p[0] for p in plants],[p[1] for p in plants]; box=(min(xs),min(zs),max(xs)+1,max(zs)+1)
@@ -110,7 +115,7 @@ def _side(room, obj):
     import tyjokr_a11y_plus_build as build
     x1, z1, x2, z2 = _box(room)
     try:
-        x, z = build.frame().tile_of(float(obj.position.x), float(obj.position.z))
+        x, z = build.frame().local(float(obj.position.x), float(obj.position.z))
     except Exception:
         x, z = float(obj.position.x), float(obj.position.z)
     values = ((abs(z-z1), "north"), (abs(x2-x), "east"), (abs(z2-z), "south"), (abs(x-x1), "west"))
@@ -131,7 +136,7 @@ def _kind(obj):
 def _doors(room, by_id, frame):
     import tyjokr_a11y_tiles as tiles
     found = set()
-    own = set((int(round(x)), int(round(z))) for x, z in room.tiles)
+    own = _room_cells(room)
     for i, j in own:
         try: doors = tiles.doors(frame, i, j, room.level)
         except Exception: continue
@@ -184,7 +189,7 @@ def _target_rows():
     top_rooms = [r for r in rooms if r.level == top]
     boxes = [_box(r) for r in top_rooms]
     whole = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
-    union = set((int(round(x)),int(round(z))) for r in top_rooms for x,z in r.tiles)
+    union = set().union(*(_room_cells(r) for r in top_rooms))
     safe_whole = _cells_shape(union) in ("rectangular","roughly square")
     rows = [("Whole top floor", "{} rooms, {} by {} metres; {}.".format(len(top_rooms), whole[2]-whole[0], whole[3]-whole[1], "safe rectangular footprint" if safe_whole else "non-rectangular and will be refused"), (whole, top, [r.name for r in top_rooms], safe_whole))]
     rows += [(r.name, "{}, {} by {} metres.".format(_shape(r), _box(r)[2]-_box(r)[0], _box(r)[3]-_box(r)[1]), (_box(r), r.level, [r.name], _shape(r) in ("rectangular","roughly square"))) for r in top_rooms]
@@ -300,7 +305,7 @@ def chimney_assistant():
         roof_level=max(r.level for r in _rooms())+1
         try:
             import tyjokr_a11y_plus_build as build
-            east, north = build.frame().tile_of(float(obj.position.x), float(obj.position.z))
+            east, north = build.frame().local(float(obj.position.x), float(obj.position.z))
         except Exception:
             east, north = float(obj.position.x), float(obj.position.z)
         try:

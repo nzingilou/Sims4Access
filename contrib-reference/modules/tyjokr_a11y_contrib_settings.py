@@ -105,8 +105,6 @@ def _install_menu():
                      help="number 1 focuses the selected layer; number 4 names nearby object layers"),
             menu.Row("chair_alignment_hints", "bool", "chair-to-table orientation hints",
                      help="for dining and desk chairs, names the nearest compatible table and facing relation"),
-            menu.Row("chair_alignment_hints", "bool", "chair-to-table orientation hints",
-                     help="names the nearest compatible table and facing relation"),
             menu.Row("experimental_bare_ground", "bool", "experimental bare-ground placement",
                      help="requires natural ground and exact game validation"),
             menu.Row("experimental_water", "bool", "experimental water placement",
