@@ -43,7 +43,7 @@ def _room_parts(frame):
     current_room, current_outside = grid._last_room
     changed = ((previous_outside is not None and current_outside is not None and current_outside != previous_outside)
                or (previous_room is not None and current_room is not None and current_room != previous_room and not current_outside))
-    if changed and not current_outside:
+    if changed and not current_outside and current_room is not None:
         name = _room_map(refresh=True).get((int(current_room), int(grid._level)))
         if name: parts = [grid._text("Entering {}. ", "Wchodzisz do: {}. ").format(name)]
     return parts, facts
@@ -51,7 +51,11 @@ def _room_parts(frame):
 def _wall_parts(frame, all_sides=False, objects=None):
     import tyjokr_a11y_grid as grid
     import tyjokr_a11y_tiles as tiles
-    parts = list(_original_wall_parts(frame, all_sides=all_sides, objects=objects))
+    import inspect
+    arguments = {"all_sides": all_sides}
+    if "objects" in inspect.signature(_original_wall_parts).parameters:
+        arguments["objects"] = objects
+    parts = list(_original_wall_parts(frame, **arguments))
     if all_sides: return parts
     i, j = grid._tile
     sides, doors, names = tiles.walls(frame, i, j, grid._level), tiles.doors(frame, i, j, grid._level), _room_map()
