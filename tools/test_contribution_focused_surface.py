@@ -32,6 +32,9 @@ def attempt():
     return ns['_finish_on_surface']('new TV',{'id':42},100,None,None,0,None,0,'tile')
 assert attempt() is True and len(finished)==1
 assert place._free_slot is baseline_slot
+slot.is_deco_slot=lambda:True
+assert attempt() is True and len(finished)==2
+finished.pop()
 slot.empty=False
 assert attempt() is False and len(finished)==1 and destroyed==['new TV']
 assert 'no compatible free slot' in speech[-1]

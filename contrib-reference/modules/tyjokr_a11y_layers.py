@@ -46,11 +46,20 @@ def _finish_on_surface(obj, item, price, need, position, level, routing_surface,
             return None
         if not services.active_lot().is_position_on_lot(target.position):
             return None
-        for slot in _surface_slots(target):
+        for index, slot in enumerate(_surface_slots(target)):
             try:
-                if slot.empty and not slot.is_deco_slot() and slot.is_valid_for_placement(obj=candidate):
+                if not slot.empty:
+                    _log("surface {} slot {} occupied".format(target_id, index))
+                    continue
+                # Decoration classification alone is not a compatibility
+                # verdict. For an explicitly selected surface, ask the game.
+                valid = slot.is_valid_for_placement(obj=candidate)
+                _log("surface {} slot {} product {} validation={!r}".format(
+                    target_id, index, product, valid))
+                if valid:
                     return target, slot
-            except Exception:
+            except Exception as ex:
+                _log("surface {} slot {} validation error: {!r}".format(target_id, index, ex))
                 continue
         return None
     if selected_slot(obj, position, level) is None:
