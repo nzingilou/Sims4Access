@@ -1,5 +1,7 @@
 # Developer manifest
 
+- `tyjokr_a11y_house_planner.py`: `_client_size` and `_client_to_screen` replace the Plus helper's DPI-divided dimensions and DPI-multiplied mouse mapping. Evidence: 2880x1800 display, 1440x900 estimated stage, matching native input/stage cursor values. Offline tests cover fullscreen dimensions and an offset window; in-game confirmation remains pending.
+
 - `tyjokr_a11y_layers.py`: `_build_place` captures the focused surface and acknowledgement identity; `_finish_on_surface` checks real slot compatibility and delegates ownership/payment to the baseline finish transaction. The temporary slot lookup is restored in `finally`. Regression check: `tools/test_contribution_focused_surface.py`.
 
 - `tyjokr_a11y_house_planner.py`, `_room_overview` / `_point_and_act`: wraps shared overview room drawing with fixed bounds, five increasing camera distances, panel checks and framing logs. Non-overview calls delegate to the baseline. Remove this wrapper assignment to revert this fix.

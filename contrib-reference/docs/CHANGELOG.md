@@ -1,5 +1,7 @@
 # Changelog
 
+- Building helpers use client-pixel dimensions and client-to-screen translation without reapplying Windows DPI scaling. This corrects false off-screen refusals and doubled mouse positions at 200% scaling.
+
 - Focused-surface placement now lets the game validate decorative-classified slots too; slot occupancy, validation results and exceptions are logged separately.
 
 - Enter tries an explicitly focused surface for floor/surface-compatible catalog objects. Game-validated free slots are required; full or incompatible surfaces refuse purchase instead of falling back to the floor.

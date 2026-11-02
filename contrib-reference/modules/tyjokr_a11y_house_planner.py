@@ -10,6 +10,32 @@ _original_stairs = None
 _original_build = None
 _original_point_and_act = None
 
+def _client_size():
+    """Game cursor coordinates already use client pixels, not DPI units."""
+    import ctypes
+    import tyjokr_a11y_plus_build as build
+    class RECT(ctypes.Structure):
+        _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long),
+                    ("r", ctypes.c_long), ("b", ctypes.c_long)]
+    u = build._user32()
+    hwnd = u.GetForegroundWindow()
+    rect = RECT()
+    if not hwnd or not u.GetClientRect(hwnd, ctypes.byref(rect)):
+        raise RuntimeError("game client rectangle unavailable")
+    return float(rect.r - rect.l), float(rect.b - rect.t)
+
+def _client_to_screen(x, y):
+    import ctypes
+    import tyjokr_a11y_plus_build as build
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+    u = build._user32()
+    hwnd = u.GetForegroundWindow()
+    point = POINT(int(round(x + build.OFFSET[0])), int(round(y + build.OFFSET[1])))
+    if not hwnd or not u.ClientToScreen(hwnd, ctypes.byref(point)):
+        raise RuntimeError("game client-to-screen conversion failed")
+    return point.x, point.y
+
 def _room_overview(points, level, attempt):
     """Simulation thread: widen the view without moving the room bounds."""
     import camera, terrain, sims4.math
@@ -252,6 +278,8 @@ def install():
         _original_stairs=house.place_stairs_worker; house.place_stairs_worker=_stacked_stairs
         _original_build=house._build; house._build=_build_with_followup
         _original_point_and_act=build.point_and_act; build.point_and_act=_point_and_act
+        build._stage_size = _client_size
+        build._to_screen = _client_to_screen
         house._stacked_planner_installed=True; _log("stacked planner installed")
     except Exception as ex:_log("install failed: {!r}".format(ex))
 
