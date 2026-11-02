@@ -1,5 +1,7 @@
 # Changelog
 
+- Enter tries an explicitly focused surface for floor/surface-compatible catalog objects. Game-validated free slots are required; full or incompatible surfaces refuse purchase instead of falling back to the floor.
+
 - Room-construction overview retries now widen the camera distance around fixed room bounds; blocked screen points stop drawing and log framing details.
 
 - Added saved scanner scopes: 6/12/24/40 metres, whole lot, current floor, and current room. Sims remain unfiltered in metre modes.

@@ -10,6 +10,61 @@ _original_detail = None
 _original_sell_here = None
 _original_change_height = None
 _original_build_place = None
+_original_finish = None
+_surface_request = None
+
+
+def _surface_slots(surface):
+    try:
+        return list(surface.get_runtime_slots_gen())
+    except Exception:
+        return []
+
+
+def _finish_on_surface(obj, item, price, need, position, level, routing_surface, angle, key, exact=False):
+    """Keep the baseline ownership/payment transaction and validate real slots."""
+    global _surface_request
+    import services
+    import tyjokr_a11y_place as place
+    request, _surface_request = _surface_request, None
+    if request is None:
+        return _original_finish(obj, item, price, need, position, level, routing_surface, angle, key, exact)
+    serial, product, zone, target_id, target_key = request
+    target = services.object_manager().get(target_id)
+    if (place._pending['serial'] != serial or item['id'] != product
+            or place._zone_id() != zone or key != target_key or target is None
+            or target is not _focused_target()):
+        place._destroy(obj)
+        place._say_text("The selected surface changed. Nothing was bought.",
+                        "Wybrana powierzchnia zmienila sie. Nic nie kupiono.")
+        return False
+    def selected_slot(candidate, _position, _level):
+        if int(target.level) != int(_level) or target.is_in_inventory() or target.is_hidden():
+            return None
+        owner = target.get_household_owner_id()
+        if owner and owner != place._household_id():
+            return None
+        if not services.active_lot().is_position_on_lot(target.position):
+            return None
+        for slot in _surface_slots(target):
+            try:
+                if slot.empty and not slot.is_deco_slot() and slot.is_valid_for_placement(obj=candidate):
+                    return target, slot
+            except Exception:
+                continue
+        return None
+    if selected_slot(obj, position, level) is None:
+        _log("focused surface {} has no compatible free slot for {}".format(target_id, product))
+        place._destroy(obj)
+        place._say_text("The focused surface has no compatible free slot for this object. Nothing was bought.",
+                        "Wybrana powierzchnia nie ma zgodnego wolnego miejsca. Nic nie kupiono.")
+        return False
+    original_free_slot = place._free_slot
+    try:
+        place._free_slot = selected_slot
+        return _original_finish(obj, item, price, 'slot', position, level, routing_surface, angle, key, exact)
+    finally:
+        place._free_slot = original_free_slot
 
 
 def _enabled():
@@ -296,7 +351,28 @@ def _sell_here():
 def _build_place():
     """Refuse a wall placement when the announced target is not a wall band."""
     import tyjokr_a11y_place as place
+    import tyjokr_a11y_grid as grid
+    global _surface_request
     item = place.product()
+    target = _focused_target() if _enabled() else None
+    if item is not None and target is not None and place.requirement(item['id']) in (None, 'slot'):
+        slots = _surface_slots(target)
+        if slots:
+            cursor = grid.cursor()
+            if cursor is None:
+                return False
+            position, level, _ident = cursor
+            # Capture the actual acknowledgement serial; never select a nearby
+            # alternative or fall back to buying this object on the floor.
+            if place._pending['args'] is not None:
+                return place.place(position, level, grid._surface())
+            _surface_request = (place._pending['serial'] + 1, item['id'], place._zone_id(),
+                                target.id, place.tile_key(position, level))
+            accepted = place.place(position, level, grid._surface())
+            if not accepted:
+                _surface_request = None
+            return accepted
+    _surface_request = None
     if (_enabled() and item is not None and place.requirement(item["id"]) == "wall"
             and _mode_info()[0] != "wall"):
         place._say_text(
@@ -333,12 +409,16 @@ def install():
     global _original_detail, _original_sell_here, _original_change_height, _original_build_place
     import tyjokr_a11y_grid as grid
     import tyjokr_a11y_wall as wall
+    import tyjokr_a11y_place as place
+    global _original_finish
     if getattr(grid, "_layer_focus_installed", False):
         return
     _original_detail = grid._detail
     _original_sell_here = grid._sell_here
     _original_build_place = grid._build_place
     _original_change_height = wall.change_height
+    _original_finish = place._finish
+    place._finish = _finish_on_surface
     grid._detail = _detail
     grid._sell_here = _sell_here
     grid._sell_target = _sell_target

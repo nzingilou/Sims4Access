@@ -43,6 +43,8 @@ The winter-garden preset builds an enclosed room. Add large windows afterward us
 
 ## Contribution shortcuts
 
+To place a TV or other compatible catalog object on furniture: select the ground layer, press `1` until the supporting furniture is announced as **Focused**, then press Enter. A full or incompatible surface refuses purchase. Objects merely listed in “Objects here” are not selected surface targets. This path requires in-game testing with the chosen TV and stand.
+
 - `Ctrl+,`: previous scanner scope.
 - `Ctrl+.`: next scanner scope.
 - `M` in the Build grid: select the furniture at the cursor to move; navigate and press `M` again to place it. `Escape` cancels.
