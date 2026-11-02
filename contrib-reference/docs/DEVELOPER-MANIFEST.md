@@ -1,5 +1,7 @@
 # Developer manifest
 
+- `tyjokr_a11y_house_planner.py`, `_room_overview` / `_point_and_act`: wraps shared overview room drawing with fixed bounds, five increasing camera distances, panel checks and framing logs. Non-overview calls delegate to the baseline. Remove this wrapper assignment to revert this fix.
+
 Baseline: the supplied updated release. Python changes are additive except the existing appended contribution import in `tyjokr_a11y_scanner.pyc`.
 
 - `tyjokr_a11y_contrib.py` (scanner scopes, move integration, optional-module loader).

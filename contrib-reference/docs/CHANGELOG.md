@@ -1,5 +1,7 @@
 # Changelog
 
+- Room-construction overview retries now widen the camera distance around fixed room bounds; blocked screen points stop drawing and log framing details.
+
 - Added saved scanner scopes: 6/12/24/40 metres, whole lot, current floor, and current room. Sims remain unfiltered in metre modes.
 - Added reversible Build-grid furniture move/sell support, clearer wall/room-side announcements, named-room integration, and validated wall height/anchoring.
 - Added independently configurable, game-validated bare-ground, water, ceiling, fence, and surface-layer placement helpers.

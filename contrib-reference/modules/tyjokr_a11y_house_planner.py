@@ -8,6 +8,50 @@ import tyjokr_a11y_speech as speech
 _pending_stairs = []
 _original_stairs = None
 _original_build = None
+_original_point_and_act = None
+
+def _room_overview(points, level, attempt):
+    """Simulation thread: widen the view without moving the room bounds."""
+    import camera, terrain, sims4.math
+    xs, zs = [p[0] for p in points], [p[1] for p in points]
+    cx = (min(xs) + max(xs)) / 2.0
+    tz = max(zs) - 1.0
+    span = max(max(xs) - min(xs), max(zs) - min(zs))
+    y = terrain.get_terrain_height(cx, tz) + 3.0 * level
+    up = (14.0 + span * 1.1) * (1.0 + 0.5 * attempt)
+    camera.focus_on_object_from_position(
+        obj_position=sims4.math.Vector3(cx, y, tz),
+        camera_position=sims4.math.Vector3(cx, y + up, tz + up * 0.3))
+
+def _point_and_act(points_world, level, action, describe, height=0.0, view=None, overview=False):
+    import tyjokr_a11y_plus_build as build
+    if not overview:
+        return _original_point_and_act(points_world, level, action, describe,
+                                      height=height, view=view, overview=False)
+    points = tuple(points_world)
+    if not points:
+        return False
+    build._hook_replies()
+    try:
+        for attempt in range(5):
+            build.cursor_off()
+            # Wait for the simulation-thread camera call before allowing its
+            # animation to settle and asking the UI for fresh projections.
+            build.on_main(_room_overview, points, level, attempt)
+            time.sleep(1.8)
+            projected = [build.project(x, z, level, height=height) for x, z in points]
+            clear = all(p is not None and build._clear_of_panels(p) for p in projected)
+            _log("room framing attempt={} level={} bounds={} screen={} stage={} clear={}".format(
+                attempt + 1, level, points, projected, build._stage_size(), clear))
+            if clear:
+                build.cursor_off()
+                action(projected)
+                time.sleep(1.0)
+                return True
+        build.core.post(build.core.speak, "The room corners could not be framed clear of the interface. Construction stopped before drawing this room.")
+        return False
+    finally:
+        build.park_mouse()
 
 def _log(text):
     try: speech.log_line("house planner: " + text)
@@ -200,12 +244,14 @@ def shaped_stair_diagnostics():
     threading.Thread(target=work,name="a11y_stair_discovery",daemon=True).start()
 
 def install():
-    global _original_stairs, _original_build
+    global _original_stairs, _original_build, _original_point_and_act
     try:
         import tyjokr_a11y_plus_house as house
+        import tyjokr_a11y_plus_build as build
         if getattr(house,"_stacked_planner_installed",False): return
         _original_stairs=house.place_stairs_worker; house.place_stairs_worker=_stacked_stairs
         _original_build=house._build; house._build=_build_with_followup
+        _original_point_and_act=build.point_and_act; build.point_and_act=_point_and_act
         house._stacked_planner_installed=True; _log("stacked planner installed")
     except Exception as ex:_log("install failed: {!r}".format(ex))
 
