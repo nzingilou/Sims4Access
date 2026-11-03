@@ -49,7 +49,9 @@ Ctrl+Alt+R: Read the current control or stop speech.
 
 In text fields, arrows edit text. Tab or Shift+Tab leaves the field.
 In purchase lists, Left and Right change quantity. Enter on an item
-focuses Done; another Enter confirms. Tab also reaches Done.
+focuses Done when the cart can be confirmed; another Enter confirms.
+If Done is unavailable, Enter keeps the item focused and reads the reason
+and quantity controls. Tab also reaches Done.
 In cooking and drink recipe lists, Enter chooses the focused recipe.
 If it opens serving sizes, press Down to a size, then Enter to cook.
 In Sim pickers, Space or Enter selects; Tab reaches confirmation.

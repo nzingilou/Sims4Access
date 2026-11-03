@@ -15,11 +15,13 @@
   },
   "handler_methods": 39,
   "handler_copies": 29,
-  "regression_suites": 110,
-  "reported_checks": 1482,
+  "regression_suites": 111,
+  "reported_checks": 1491,
   "input_stable": true,
   "files": {
-    "TS4_Access_UI.package": "92bc6aff38560b70b5ad1f55ad0bdaefcf42a36cd5843dbc95fa9bc37299f165",
-    "TS4_Access_Compatibility_UICheats.package": "ae5935ed88271e6687760350eb015b482682473ee04b49c4983dcc7627091642"
-  }
+    "TS4_Access_UI.package": "79546d41f109f54a0ad4dff87ca933cf6899413e7832f616d6f3d2c4e603226b",
+    "TS4_Access_Compatibility_UICheats.package": "826c32befe9c96f129ff88202f69304a3c33f40ab5156577175ec41659bc9c48"
+  },
+  "purchase_fix_base": "d2696214818f06a279c879581c57b98ac141aaa6",
+  "purchase_footer_guard_copies": 29
 }

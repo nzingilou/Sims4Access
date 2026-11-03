@@ -3471,6 +3471,9 @@ package olympus.core
       {
          var owner:Object = item;
          var button:DisplayObject = null;
+         var reason:String = "";
+         var extension:Object = null;
+         var keys:Object = null;
          try
          {
             while(owner != null && owner != this.mTooltipsLayer.stage)
@@ -3479,6 +3482,26 @@ package olympus.core
                else if(!advance && "btnDone" in owner) { button = owner["btnDone"] as DisplayObject; }
                if(button != null && this.A11yIsLive(button))
                {
+                  // Purchase rows do not add quantity on Enter. Do not move
+                  // to a disabled Done button and strand an empty cart there.
+                  if(!advance && "enabled" in button && Object(button)["enabled"] == false)
+                  {
+                     try
+                     {
+                        extension = Object(button)["TooltipExt"];
+                        if(extension != null && extension["Text"] != null) { reason = String(extension["Text"]); }
+                        if(reason.length == 0)
+                        {
+                           keys = getDefinitionByName("olympus.localization.KeysConsole");
+                           reason = keys["PURCHASE_PICKER_EMPTY_CART"].toString();
+                        }
+                     }
+                     catch(reasonError:Error) { }
+                     if(reason.length == 0) { reason = "Choose an item quantity before confirming."; }
+                     this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|" + reason + " Use Right and Left on an item to change quantity, then Enter for Done."));
+                     this.A11yPostToPython("a11y.mark","purchase-footer-disabled");
+                     return true;
+                  }
                   this.A11yFocusItem(button);
                   if(advance && Object(button)["enabled"]) { this.A11yActivate(false); }
                   return true;

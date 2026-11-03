@@ -37,13 +37,15 @@ All 25 current-game inputs were checked against the installed UI, targeted nativ
 | SimHub | Pass |
 | TimeControls | Pass |
 
-Regression suite after the second audit: **passed**, **input_stable true**, 1,482 reported checks across 110 isolated suites (includes repeated imported checks). Static message inventory: 35 registered messages, no missing handler methods, no unmatched literal Flash speech commands; Repeat and SpeechMode are Python-local controls.
+Regression suite including the purchase follow-up: **passed**, **input_stable true**, 1,491 reported checks across 111 isolated suites (includes repeated imported checks). Static message inventory: 35 registered messages, no missing handler methods, no unmatched literal Flash speech commands; Repeat and SpeechMode are Python-local controls.
 
-Second audit: 39 routing/activation methods match the Git base source and have matching normalized instructions, jump destinations and exception ranges across all 29 patched TooltipManager copies. Game Python modules and contribution modules match the Git base. The new nine-case scanner pick bridge fixture exercises encoded picks through `A11yOpenPieMenu` to `interactions.choices`, including large IDs, Sim picks, native-message forwarding, mode changes and request-ID rollover. The current native EA pie menu retains the same 14-argument interaction request layout. No additional mod-code fix was needed after this audit.
+Handler audit: 39 routing/activation methods match the Git base source and have matching normalized instructions, jump destinations and exception ranges across all 29 patched TooltipManager copies. Game Python modules and contribution modules match the Git base. The updated purchase-footer helper was separately verified in all 29 copies. The nine-case scanner pick bridge fixture exercises encoded picks through `A11yOpenPieMenu` to `interactions.choices`, including large IDs, Sim picks, native-message forwarding, mode changes and request-ID rollover. The current native EA pie menu retains the same 14-argument interaction request layout.
 
 Compatibility: six current UI Cheats inputs compared and rebuilt; fidelity gate passed 19 targeted-class comparisons. Exact non-code tags and class sets are preserved in all six.
 
 ## Changes
+
+Purchase follow-up: the log's Romantic Items cart remained at count/cost zero while Enter moved from the Sweetheart's Box row to disabled Done. Current EA `PurchasePicker.CheckCost` requires a nonempty cart and sufficient funds. `A11yPickerFooter` now retains row focus when Done is disabled, reads its native funds reason or the native empty-cart text, and announces Left/Right quantity controls. Native quantity, affordability and confirmation actions are preserved. Its nine-case fixture covers empty carts, funds, enabled confirmation, teardown, recipe Next, the quantity-to-confirmation sequence and game-disabled increases. The diagnostic marker is `purchase-footer-disabled`. Fresh full rebuild/gate reports are under `build/purchase-fix/`.
 
 - `flash/extra-classes/CommodityContainer.as`, `A11yMotiveText`: use EA's trait-dependent `GetCommodityName(AllTraitIds)` like the displayed title. Clamp percentages and omit invalid numeric values. Existing speech channel retained.
 - `tools/ui_port_inventory.py`: verify all 25 inputs against the installed UI and find actual class definitions across the complete package.
