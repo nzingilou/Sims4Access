@@ -1,0 +1,13 @@
+UI port test candidate for game 1.129.39.1030
+
+Use with your current contribution ts4script. This candidate contains UI package changes.
+
+With the game closed, back up your existing UI packages. Replace TS4_Access_UI.package in Mods/TS4_Access. If UI Cheats is installed, also replace TS4_Access_Compatibility_UICheats.package in your higher-priority override folder. Your current Resource.cfg uses Mods/_Overrides for that purpose.
+
+Test scanner Enter on an object and a Sim, then close the pie menu and navigate again. Check opening a dialog and returning to the scanner. Check build-grid/catalog navigation and CAS entry.
+
+In needs, use the existing Tab/arrow navigation to read occult meters, rank/points, and the native powers button. In the powers screen, navigate individual abilities; selection and confirmation remain the game's own actions.
+
+In Manage Worlds transfer, reach the neighborhood expand button and its visible destination households. Check purchase-books row navigation and quantities; with UI Cheats, check its right-click quantity behavior too.
+
+Gallery description/filter improvements remain a documented follow-up. Capture the mod log if a flow fails. To roll back, close the game and restore the UI packages you backed up.

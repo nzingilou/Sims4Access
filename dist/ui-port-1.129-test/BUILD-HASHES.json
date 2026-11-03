@@ -1,0 +1,25 @@
+{
+  "game_version": "1.129.39.1030",
+  "git_base": "d7c59d5281ebb509a2265f3ebe17d1d94353f06b",
+  "status": "offline-validated test candidate; not live verified",
+  "game_ui_sha256": "6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83",
+  "ui_cheats_input_sha256": "95d177c7ceed605474983c5affdc1eda7a097a5b37148419c2c33fd746b69d94",
+  "ffdec": "26.2.1",
+  "jdk": "Microsoft 21.0.9",
+  "python": "3.7.9",
+  "standard_movies": 25,
+  "compatibility_movies": 6,
+  "fidelity_target_comparisons": {
+    "standard": 62,
+    "compatibility": 19
+  },
+  "handler_methods": 39,
+  "handler_copies": 29,
+  "regression_suites": 110,
+  "reported_checks": 1482,
+  "input_stable": true,
+  "files": {
+    "TS4_Access_UI.package": "92bc6aff38560b70b5ad1f55ad0bdaefcf42a36cd5843dbc95fa9bc37299f165",
+    "TS4_Access_Compatibility_UICheats.package": "ae5935ed88271e6687760350eb015b482682473ee04b49c4983dcc7627091642"
+  }
+}

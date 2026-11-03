@@ -27,4 +27,4 @@ assert ns['_client_to_screen'](1440,900)==(1440,900)
 u.width,u.height,u.left,u.top=1600,1000,120,80
 assert ns['_client_size']()==(1600,1000)
 assert ns['_client_to_screen'](800,500)==(920,580)
-print('PASS native-resolution and offset-window client coordinates without extra DPI scaling')
+print('1 contribution display scenario checks passed: native resolution and offset-window coordinates')

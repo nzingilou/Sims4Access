@@ -426,4 +426,54 @@ test('Probe deactivation and deadline both unregister without persistent observa
   assert.equal(actions.length, 0);
   assert.equal(ui.A11yKeyProbeValid(), false);
 });
+test('Transfer neighborhood wrappers expose expand and visible destination households', () => {
+  const ui = manager(), row = new MovieClip('world', 'widgets.TransferPanel.controls::TransferNhdItemCellView');
+  row.focusable = true;
+  const expand = row.add(new MovieClip('btnNeighborhood')); expand.focusable = true;
+  const grid = row.add(new MovieClip('mcSelectionGrid'));
+  const household = grid.add(new MovieClip('household')); household.focusable = true;
+  grid.visible = false;
+  const closed = []; ui.A11yCollectFocusables(row, closed, 0);
+  assert.deepStrictEqual(closed, [expand]);
+  grid.visible = true;
+  const open = []; ui.A11yCollectFocusables(row, open, 0);
+  assert.deepStrictEqual(open, [expand, household]);
+});
+test('Occult ability rank wrappers expose individual native choices without activating them', () => {
+  for (const kind of [
+    'widgets.Gameplay.PerksPanel.controls::PerkRowCellView',
+    'widgets.Gameplay.PerksPanel.controls::FairyPerkRowCellView'
+  ]) {
+    const ui = manager(), row = new MovieClip('rank', kind); row.focusable = true;
+    const grid = row.add(new MovieClip('mcPrimaryGrid'));
+    const first = grid.add(new MovieClip('power1')); first.focusable = true;
+    const second = grid.add(new MovieClip('power2')); second.focusable = true;
+    first.activate = second.activate = () => { throw Error('Traversal must not purchase'); };
+    const targets = []; ui.A11yCollectFocusables(row, targets, 0);
+    assert.deepStrictEqual(targets, [first, second]);
+    second.visible = false;
+    const visible = []; ui.A11yCollectFocusables(row, visible, 0);
+    assert.deepStrictEqual(visible, [first]);
+  }
+});
+test('Occult rank rows expose localized points and retain their native powers button', () => {
+  for (const kind of [
+    'widgets.Gameplay.SimInfoHUD.MotivePanel::MotivePanelRankedStatContent',
+    'widgets.Gameplay.SimInfoHUD.SummaryPanel::SummaryPanelRankedStatContent'
+  ]) {
+    const ui = manager(), row = new MovieClip('rank', kind);
+    row.add(new TextField('txtTalentPointsTitle', 'Talent points'));
+    row.add(new TextField('txtTalentPoints', '3'));
+    const button = row.add(new MovieClip('btnPowersPanel')); button.focusable = true;
+    const targets = []; ui.A11yCollectFocusables(row, targets, 0);
+    assert.deepStrictEqual(targets, [row, button]);
+    const lines = []; ui.A11yCollectText(row, lines, 0, true);
+    assert(lines.some(line => line.endsWith('|Talent points')));
+    assert(lines.some(line => line.endsWith('|3')));
+    row.visible = false;
+    const hidden = []; ui.A11yCollectFocusables(row, hidden, 0);
+    assert.deepStrictEqual(hidden, []);
+  }
+  assert.strictEqual(manager().A11yInformational(new MovieClip('rank', 'unrelated::RankedStatContent')), false);
+});
 console.log(passed + ' Flash navigation fixture checks passed (not in-game verification).');

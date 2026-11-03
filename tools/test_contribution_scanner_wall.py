@@ -56,4 +56,4 @@ w['_wall_state']=lambda:(frame,{0:'wall'},{0:object()})
 assert w['_selected_wall']() is None
 w['_wall_state']=lambda:(frame,{0:'open'},{})
 assert w['_selected_wall']() is None
-print('PASS scanner Sims/range/lot/room scopes, category identity, wall anchoring and door exclusion')
+print('1 scanner wall scenario checks passed: scopes, category identity, wall anchoring and door exclusion')

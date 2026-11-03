@@ -41,4 +41,4 @@ assert 'no compatible free slot' in speech[-1]
 slot.empty=True; slot.is_valid_for_placement=lambda **kw:False
 assert attempt() is False and len(finished)==1
 assert place._free_slot is baseline_slot
-print('PASS focused stand, full/incompatible slot refusal, baseline transaction and helper restoration')
+print('1 focused surface scenario checks passed: stand, slot refusal, transaction and helper restoration')

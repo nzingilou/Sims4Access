@@ -36,4 +36,4 @@ assert ns['_point_and_act'](points,0,actions.append,'room',overview=True) is Tru
 assert len(actions) == 1
 ns['_original_point_and_act'] = lambda *a,**kw:'baseline'
 assert ns['_point_and_act'](points,0,actions.append,'door') == 'baseline'
-print('PASS fixed target, increasing camera distance, guarded drawing and non-overview delegation')
+print('1 room framing scenario checks passed: target, camera distance, guarded drawing and delegation')

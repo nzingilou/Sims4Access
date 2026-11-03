@@ -3190,6 +3190,10 @@ package olympus.core
          try
          {
             name = getQualifiedClassName(item);
+            // Occult XP/points are not buttons. Retain one informational
+            // stop while the existing walker also exposes the native powers
+            // button. Match only EA's two known rows, not unrelated panels.
+            if(name == "widgets.Gameplay.SimInfoHUD.MotivePanel::MotivePanelRankedStatContent" || name == "widgets.Gameplay.SimInfoHUD.SummaryPanel::SummaryPanelRankedStatContent") { return true; }
             if("btnAdd" in item && "txtLabel" in item) { return true; }
             if(name.indexOf("JobInfoCellView") >= 0 || name.indexOf("PerformanceMoodDetails") >= 0) { return true; }
             if(name.indexOf("ProfileDataCell") >= 0) { return true; }
@@ -6430,6 +6434,13 @@ package olympus.core
          // grid. Only the child button emits EA's mainRowClick event; focus
          // both it and visible serving buttons instead of the inert wrapper.
          if(getQualifiedClassName(item) == "widgets.Pickers.controls.GridPicker::RowCellView") { return true; }
+         // These rank rows wrap the real, game-validated ability buttons.
+         // Treating the CellView wrapper as a choice hides every power in
+         // the nested grids (including werewolf and fairy abilities).
+         if(getQualifiedClassName(item) == "widgets.Gameplay.PerksPanel.controls::PerkRowCellView" || getQualifiedClassName(item) == "widgets.Gameplay.PerksPanel.controls::FairyPerkRowCellView") { return true; }
+         // Transfer's neighborhood row owns an expand button and a nested
+         // household grid. The wrapper has no native selection action.
+         if(getQualifiedClassName(item) == "widgets.TransferPanel.controls::TransferNhdItemCellView") { return true; }
          // EA's category cell wraps the world grid; StreetClip wraps mcLots.
          // Neither is the destination button. Stopping here hides its choices.
          if(getQualifiedClassName(item) == "widgets.GameEntry.WorldSelection.controls::WorldRegionTypeCellView" || getQualifiedClassName(item) == "widgets.GameEntry.Neighborhood.controls::StreetClip") { return true; }
