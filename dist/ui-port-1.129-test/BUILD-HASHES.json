@@ -1,7 +1,7 @@
 {
   "game_version": "1.129.39.1030",
   "git_base": "d7c59d5281ebb509a2265f3ebe17d1d94353f06b",
-  "status": "offline-validated test candidate; not live verified",
+  "status": "offline-validated test candidate; in-game panel verification pending",
   "game_ui_sha256": "6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83",
   "ui_cheats_input_sha256": "95d177c7ceed605474983c5affdc1eda7a097a5b37148419c2c33fd746b69d94",
   "ffdec": "26.2.1",
@@ -16,12 +16,14 @@
   "handler_methods": 39,
   "handler_copies": 29,
   "regression_suites": 111,
-  "reported_checks": 1491,
+  "reported_checks": 1497,
   "input_stable": true,
   "files": {
-    "TS4_Access_UI.package": "79546d41f109f54a0ad4dff87ca933cf6899413e7832f616d6f3d2c4e603226b",
-    "TS4_Access_Compatibility_UICheats.package": "826c32befe9c96f129ff88202f69304a3c33f40ab5156577175ec41659bc9c48"
+    "TS4_Access_UI.package": "9c22acf6ee87a6611fdaafe630c81112abba5da8d8a899433b72c0e494def5b0",
+    "TS4_Access_Compatibility_UICheats.package": "a6cad27735d0e4be618f1b4d260bd8c17655af02271928b7b1d9436a89e78a35"
   },
   "purchase_fix_base": "d2696214818f06a279c879581c57b98ac141aaa6",
-  "purchase_footer_guard_copies": 29
+  "purchase_footer_guard_copies": 29,
+  "panel_fix_base": "9abe4aec192a8432de57c1b05d591d56bcb1b9ce",
+  "panel_helper_copies": 29
 }

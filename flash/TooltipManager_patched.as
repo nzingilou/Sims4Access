@@ -6346,6 +6346,9 @@ package olympus.core
          try
          {
             if(item == null || item.parent == null) { return false; }
+            // Native CellView controller artwork is not an independent action.
+            // Follow the parent's explicit link, not a spoken-label heuristic.
+            if(item.name == "mcControllerHighlight" && "mcControllerHighlight" in item.parent && Object(item.parent)["mcControllerHighlight"] == item) { return true; }
             // WorldCellView.Draw only fills pack captions for a locked world.
             // Its dormant authoring clips otherwise still contain Pack Name.
             if((item.name == "mcPackInfo" || item.name == "btnUnlock") && getQualifiedClassName(item.parent) == "widgets.GameEntry.WorldSelection.controls::WorldCellView" && "btnUnlock" in item.parent && Object(item.parent)["btnUnlock"] != null && !Object(item.parent)["btnUnlock"].visible) { return true; }
@@ -6428,6 +6431,9 @@ package olympus.core
       {
          if(this.A11yTextDecoration(item)) { return true; }
          var name:String = getQualifiedClassName(item);
+         // EA retains unoccupied temperament/curse cells in the display tree.
+         // Their public IsEmpty getter is authoritative; they have no action.
+         if((name == "SimInfoMotivePanel::MotivePanelTemperamentCellView" || name == "SimInfoMotivePanel::MotivePanelCurseCellView") && "IsEmpty" in item && Object(item)["IsEmpty"]) { return true; }
          // Escape already closes the active screen. Keep the redundant
          // corner close button out of simplified option traversal.
          if(this.mA11ySimplifiedMenus && item.name == "btnClose" && this.A11ySimplifiedActive()) { return true; }
@@ -6824,6 +6830,21 @@ package olympus.core
          var _loc2_:DisplayObject = param1;
          var _loc3_:int = 0;
          var _loc4_:Object = null;
+         var panel:DisplayObject = param1;
+         var panelDepth:int = 0;
+         var panelName:String = null;
+         // These HUD panels instantiate their contents in full. Simology's
+         // outer ScrollList contains ONE SummaryPanelContent cell, not one
+         // item per section. Re-entering it by data index restarts at Traits.
+         // Walk the collected controls and reveal them with the native slider;
+         // retain indexed navigation for pickers and other recycled lists.
+         while(panel != null && panelDepth < 24)
+         {
+            panelName = getQualifiedClassName(panel);
+            if(panelName == "widgets.Gameplay.SimInfoHUD.MotivePanel::SimInfoMotivePanelMain" || panelName == "widgets.Gameplay.SimInfoHUD.SummaryPanel::SimInfoSummaryPanelMain" || panelName == "widgets.Gameplay.SimInfoHUD.AspirationPanel::SimInfoAspirationPanelMain") { return null; }
+            panel = panel.parent;
+            panelDepth = panelDepth + 1;
+         }
          while(_loc2_ != null && _loc3_ < 14)
          {
             try

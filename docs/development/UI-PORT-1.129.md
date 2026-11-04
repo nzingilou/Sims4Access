@@ -37,7 +37,7 @@ All 25 current-game inputs were checked against the installed UI, targeted nativ
 | SimHub | Pass |
 | TimeControls | Pass |
 
-Regression suite including the purchase follow-up: **passed**, **input_stable true**, 1,491 reported checks across 111 isolated suites (includes repeated imported checks). Static message inventory: 35 registered messages, no missing handler methods, no unmatched literal Flash speech commands; Repeat and SpeechMode are Python-local controls.
+Regression suite including the purchase follow-up: **passed**, **input_stable true**, 1,497 reported checks across 111 isolated suites (includes repeated imported checks). Static message inventory: 35 registered messages, no missing handler methods, no unmatched literal Flash speech commands; Repeat and SpeechMode are Python-local controls.
 
 Handler audit: 39 routing/activation methods match the Git base source and have matching normalized instructions, jump destinations and exception ranges across all 29 patched TooltipManager copies. Game Python modules and contribution modules match the Git base. The updated purchase-footer helper was separately verified in all 29 copies. The nine-case scanner pick bridge fixture exercises encoded picks through `A11yOpenPieMenu` to `interactions.choices`, including large IDs, Sim picks, native-message forwarding, mode changes and request-ID rollover. The current native EA pie menu retains the same 14-argument interaction request layout.
 
@@ -76,3 +76,7 @@ Purchase follow-up: the log's Romantic Items cart remained at count/cost zero wh
 The complete offline suite, literal bridge inventory, standard/compatibility fidelity gates and movie structure checks passed. Package identity checks follow assembly. The checkout has no `.handoff/baseline.json`, so `Dev.ps1 return` cannot create its old-format archive; the review patch is anchored to Git base `d7c59d5` instead. The old immutable baseline is not regenerated.
 
 Live tests must cover occult needs/abilities, book cart navigation/purchase, Gallery filters/descriptions, Manage Worlds transfers, scanner Enter/pie menus and CAS entry. No automated test should spend points or buy items without explicit action. Deferred Gallery changes and duplicate TimeControlsMain ownership remain separate follow-ups.
+
+## Info-panel navigation follow-up
+
+Needs, Simology and Aspirations now walk their fully instantiated controls directly, retaining native slider reveal. This avoids re-entering one-cell content wrappers or nested trait/goal grids. Empty temperament/curse slots use EA's IsEmpty getter; linked controller-highlight artwork is excluded from narration and focus. Code: TooltipManager.A11yFindScrollList, A11yKeyboardDecoration and A11yTextDecoration. Tests cover forward/backward traversal, later sections, independent pickers and decorative-control isolation. See changes/info-panel-navigation.md. In-game verification of this follow-up remains pending.

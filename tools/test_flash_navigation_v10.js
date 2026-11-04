@@ -456,6 +456,31 @@ test('Occult ability rank wrappers expose individual native choices without acti
     assert.deepStrictEqual(visible, [first]);
   }
 });
+test('Linked controller highlights are decorative; real profile rows remain reachable', () => {
+  const ui=manager(), row=new MovieClip('trait', 'SimProfile::TraitCellView'); row.focusable=true;
+  const highlight=row.add(new MovieClip('mcControllerHighlight')); highlight.focusable=true;
+  row.mcControllerHighlight=highlight;
+  assert.strictEqual(ui.A11yKeyboardDecoration(highlight),true);
+  const targets=[]; ui.A11yCollectFocusables(row,targets,0);
+  assert.deepStrictEqual(targets,[row]);
+  const unrelated=new MovieClip('mcControllerHighlight'); unrelated.focusable=true;
+  new MovieClip('other').add(unrelated);
+  assert.strictEqual(ui.A11yKeyboardDecoration(unrelated),false);
+});
+
+test('Empty occult trait slots are skipped using the native IsEmpty getter', () => {
+  for (const kind of ['SimInfoMotivePanel::MotivePanelTemperamentCellView', 'SimInfoMotivePanel::MotivePanelCurseCellView']) {
+    const ui = manager(), occupied = new MovieClip('occupied', kind), empty = new MovieClip('empty', kind);
+    occupied.IsEmpty = false; empty.IsEmpty = true;
+    occupied.focusable = empty.focusable = true;
+    const parent = new MovieClip('traits'); parent.add(empty); parent.add(occupied);
+    const targets = []; ui.A11yCollectFocusables(parent, targets, 0);
+    assert.deepStrictEqual(targets, [occupied]);
+  }
+  const unrelated = new MovieClip('other', 'unrelated::CellView'); unrelated.IsEmpty = true;
+  assert.strictEqual(manager().A11yKeyboardDecoration(unrelated), false);
+});
+
 test('Occult rank rows expose localized points and retain their native powers button', () => {
   for (const kind of [
     'widgets.Gameplay.SimInfoHUD.MotivePanel::MotivePanelRankedStatContent',
