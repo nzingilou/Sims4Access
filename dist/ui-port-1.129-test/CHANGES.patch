@@ -1,0 +1,214 @@
+diff --git a/docs/development/changes/options-settings.md b/docs/development/changes/options-settings.md
+new file mode 100644
+index 0000000..588606a
+--- /dev/null
++++ b/docs/development/changes/options-settings.md
+@@ -0,0 +1,11 @@
++# Game Options activation
++
++- `flash/TooltipManager_patched.as`, `A11yOptionsControl` / `A11yActionProxy` (around 6102 / 6777): route Options cell activation to its visible native checkbox, dropdown or text button. Retain native enabled checks, events, dropdown selection and Apply/Revert handling.
++- `A11yOptionsRowLabel` / `A11yCheckboxState` (around 6125 / 7730): read the localized label, visible value/descriptions and actual checkbox state; omit hidden controls and checkbox placeholder text. Re-read checkbox rows after activation using the existing settled-focus mechanism in `A11yActivate`.
++- `tools/test_options_simplified.js`: settings type/target, disabled control, label/value, hidden artwork, checkbox state, description and subclass coverage.
++
++Reproduction: Gameplay Auto Age and Pack Settings rows were announced, but Enter clicked the outer CellView rather than the child owning the native event. Dropdown rows also read hidden checkbox artwork as unchecked. Fix leaves row order and keyboard bindings intact.
++
++In-game test: Enter on Auto Age opens its choices; arrows then Enter choose a value. Enter/Space on a checkbox toggles and reads its state. Apply Changes saves normally. Check Gameplay, Pack Settings and a neighbouring Audio/Graphics option; verify scanner Enter after closing Options. In-game results are recorded separately from offline checks.
++
++Rollback: restore the paired previous UI packages, or reverse the source patch. No script change.
+diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
+index 32a0cd5..2bc9cbf 100644
+--- a/flash/TooltipManager_patched.as
++++ b/flash/TooltipManager_patched.as
+@@ -6096,6 +6096,28 @@ package olympus.core
+       // focused dropdown button says only its value (2026-09-26 live: the
+       // Autonomy and Auto Age rows read as bare Off and Yes). Checkbox rows
+       // are whole-cell stops that already read their label.
++      // Native option cells own labels, but only their visible child owns
++      // activation. Keep disabled controls as targets so EA's enabled guard
++      // remains authoritative. No direct setting writes or synthetic toggles.
++      public function A11yOptionsControl(item:DisplayObject) : DisplayObject
++      {
++         var name:String = item != null ? getQualifiedClassName(item) : "";
++         var control:DisplayObject = null;
++         var fields:Array = ["cbCheckbox","ddDropdown","tbTextButton"];
++         var index:int = 0;
++         if(name.indexOf("widgets.OptionsMenu.controls::") != 0 || name.indexOf("OptionsCellView") < 0) { return null; }
++         while(index < fields.length)
++         {
++            if(fields[index] in item)
++            {
++               control = Object(item)[fields[index]] as DisplayObject;
++               if(this.A11yIsLive(control)) { return control; }
++            }
++            index = index + 1;
++         }
++         return null;
++      }
++
+       public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
+       {
+          var node:DisplayObject = item;
+@@ -6109,6 +6131,18 @@ package olympus.core
+             {
+                if("lbLabel" in node && "ddDropdown" in node)
+                {
++                  if(node == item && getQualifiedClassName(node).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(node).indexOf("OptionsCellView") >= 0)
++                  {
++                     // Focused rows used to read hidden checkbox/button artwork
++                     // ("Ok", "Label Name") alongside the actual setting.
++                     result.length = 0;
++                     var control:DisplayObject = this.A11yOptionsControl(node);
++                     this.A11yCollectText(Object(node)["lbLabel"] as DisplayObject,result,1,true);
++                     if(control != null && getQualifiedClassName(control).indexOf("Checkbox") < 0) { this.A11yCollectText(control,result,1,true); }
++                     if("txtDescription" in node) { this.A11yCollectText(Object(node)["txtDescription"] as DisplayObject,result,1,true); }
++                     if("txtInformation" in node) { this.A11yCollectText(Object(node)["txtInformation"] as DisplayObject,result,1,true); }
++                     return;
++                  }
+                   if(!this.A11yIsInside(item,Object(node)["ddDropdown"] as DisplayObject)) { return; }
+                   label = Object(node)["lbLabel"];
+                   if(label == null || !label["visible"] || !("textField" in label)) { return; }
+@@ -6733,6 +6767,11 @@ package olympus.core
+       public function A11yActionProxy(item:DisplayObject) : DisplayObject
+       {
+          if(item == null) { return null; }
++         if(getQualifiedClassName(item).indexOf("widgets.OptionsMenu.controls::") == 0)
++         {
++            var option:DisplayObject = this.A11yOptionsControl(item);
++            if(option != null) { return option; }
++         }
+          if(this.mA11ySimplifiedMenus && this.A11ySaveChoice(item)) { return Object(item)["btnPlay"] as DisplayObject; }
+          if(item.parent != null && "mcFilterBubble" in item.parent && Object(item.parent)["mcFilterBubble"] == item) { return Object(item.parent)["btnFilterPanel"] as DisplayObject; }
+          if("btnSolve" in item) { return Object(item)["btnSolve"] as DisplayObject; }
+@@ -7571,6 +7610,7 @@ package olympus.core
+                // fail silently; the narrator translates this token. Ordinary
+                // disabled controls still read EA's own reason.
+                if(!this.A11yClickControl(this.A11yActionProxy(_loc2_))) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
++               else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0) { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
+                return;
+             }
+             if(this.A11yInformational(_loc2_) && !this.A11yIsFocusable(_loc2_)) { this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return; }
+@@ -7683,6 +7723,11 @@ package olympus.core
+          var _loc5_:* = undefined;
+          try
+          {
++            if(param1 != null && getQualifiedClassName(param1).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(param1).indexOf("OptionsCellView") >= 0)
++            {
++               var option:DisplayObject = this.A11yOptionsControl(param1);
++               return option != null && getQualifiedClassName(option).indexOf("Checkbox") >= 0 ? this.A11yCheckboxState(option) : "";
++            }
+             if(this.A11ySingleFilterLabel(param1) == param1 && param1 != null)
+             {
+                return this.A11yCheckboxState(Object(param1.parent)["btnCheckBox"]);
+diff --git a/tools/test_event_activation_v13.js b/tools/test_event_activation_v13.js
+index dad3689..8ad8c21 100644
+--- a/tools/test_event_activation_v13.js
++++ b/tools/test_event_activation_v13.js
+@@ -36,9 +36,13 @@ test('Activation speaks the unavailable token when the proxy click is refused',(
+  const activate=body('A11yActivate').text;
+  const branch=activate.indexOf('if(this.A11yActionProxy(_loc2_) != _loc2_)');
+  assert(branch>=0,'proxy branch present');
+- const window=activate.slice(branch,branch+600);
++ // Inspect the entire proxy branch: settings' settled reread can make
++ // it longer than the old arbitrary 600-character window.
++ const end=activate.indexOf('if(this.A11yInformational(_loc2_)',branch);
++ assert(end>branch,'next activation branch present');
++ const window=activate.slice(branch,end);
+  assert(/if\(!this\.A11yClickControl\(this\.A11yActionProxy\(_loc2_\)\)\)\s*\{\s*this\.A11yPostToPython\("a11y\.widget_enc",encodeURIComponent\("0\|0\|action unavailable"\)\);\s*\}/.test(window),'refused click is announced');
+- assert(/return;/.test(window),'branch still returns');
++ assert(/return;\s*}\s*$/.test(window),'proxy branch returns before generic dispatch');
+ });
+ test('Disabled proxy targets are still refused by A11yClickControl',()=>{
+  const click=method('A11yClickControl');
+diff --git a/tools/test_options_simplified.js b/tools/test_options_simplified.js
+index c4fdbd9..18ec09c 100644
+--- a/tools/test_options_simplified.js
++++ b/tools/test_options_simplified.js
+@@ -47,6 +47,8 @@ function method(name) {
+   while (depth) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; end++; }
+   const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|Rectangle|Boolean|Number|String|Object|Array|int|Error)\b/g;
+   const body = source.slice(start, end - 1).replace(types, '')
++    .replace(/:\s*\*/g, '')
++    .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
+     .replace(/\s+as\s+Rectangle\b/g, '')
+     .replace(/((?:Object\([\w.]+\)|[\w.]+)(?:\[[\w."]+\])*)\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)/g, 'asCast($1,$2)')
+     .replace(/\bis\s+(TextField|DisplayObjectContainer)\b/g, 'instanceof $1');
+@@ -170,4 +172,78 @@ test('focus and widget announcements call the row label decorator', () => {
+   assert(/this\.A11yMoveInQuote\(param1,_loc2_\);( this\.A11yTransferQuote\(param1,_loc2_\); this\.A11yMoveLabel\(param1,_loc2_\);)? this\.A11yOptionsRowLabel\(param1,_loc2_\);/.test(source));
+ });
+ 
+-console.log(checks + ' Options simplified checks passed (not in-game verification).');
++const optionControl = method('A11yOptionsControl');
++const optionState = method('A11yCheckboxState');
++const actionProxy = method('A11yActionProxy');
++function nativeRow(type) {
++  const row = new DisplayObjectContainer('row', 'widgets.OptionsMenu.controls::OptionsCellView');
++  row.lbLabel = row.add(new DisplayObjectContainer('lbLabel', 'olympus.controls::JustifiedLabel'));
++  row.lbLabel.textField = row.lbLabel.add(new TextField('textField', 'Auto Age:'));
++  for (const [name, kind] of [['cbCheckbox', 'Checkbox'], ['ddDropdown', 'DropdownButton'], ['tbTextButton', 'TextButton']]) {
++    row[name] = row.add(new DisplayObjectContainer(name, 'olympus.gui.buttons::' + kind));
++    row[name].visible = name === type; row[name].enabled = true;
++    row[name].add(new TextField('text', name === 'ddDropdown' ? 'Yes' : 'Ok'));
++  }
++  row.cbCheckbox.Selected = true;
++  row.txtDescription = row.add(new TextField('txtDescription', 'Explanation')); row.txtDescription.visible = false;
++  row.txtInformation = row.add(new TextField('txtInformation', 'Information')); row.txtInformation.visible = false;
++  return row;
++}
++function optionUi() {
++  const ui = labelUi();
++  ui.A11yIsLive = value => !!value && value.visible;
++  ui.A11yOptionsControl = optionControl.bind(ui);
++  ui.A11ySingleFilterLabel = () => null;
++  ui.A11yPickerToggleCell = () => false;
++  ui.A11yCheckboxState = optionState.bind(ui);
++  ui.A11yActionProxy = actionProxy.bind(ui);
++  ui.A11yCollectText = (value, lines) => {
++    if (!value || !value.visible) return;
++    if (value instanceof TextField) lines.push('0|0|' + value.text);
++    else for (const child of value.children || []) ui.A11yCollectText(child, lines);
++  };
++  return ui;
++}
++test('each option type routes to its visible native control, including disabled controls', () => {
++  const ui = optionUi();
++  for (const type of ['cbCheckbox', 'ddDropdown', 'tbTextButton']) {
++    const row = nativeRow(type);
++    assert.equal(ui.A11yActionProxy(row), row[type]);
++    row[type].enabled = false;
++    assert.equal(ui.A11yActionProxy(row), row[type]);
++  }
++});
++test('dropdowns never announce hidden checkbox state or hidden placeholder text', () => {
++  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = ['old hidden Ok'];
++  ui.A11yOptionsRowLabel(row, lines);
++  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes']);
++  assert.equal(ui.A11yCheckboxState(row), '');
++});
++test('checkbox reads current selection without its unlabelled Ok artwork', () => {
++  const ui = optionUi(), row = nativeRow('cbCheckbox'), lines = [];
++  ui.A11yOptionsRowLabel(row, lines);
++  assert.deepStrictEqual(lines, ['0|0|Auto Age:']);
++  assert.equal(ui.A11yCheckboxState(row), 'checked');
++  row.cbCheckbox.Selected = false;
++  assert.equal(ui.A11yCheckboxState(row), 'unchecked');
++});
++test('description rows and unrelated controls do not acquire an action or checkbox state', () => {
++  const ui = optionUi(), row = nativeRow(null);
++  assert.equal(ui.A11yOptionsControl(row), null);
++  assert.equal(ui.A11yCheckboxState(row), '');
++  const other = new DisplayObject('other', 'widgets.Pickers::OptionsCellView');
++  other.cbCheckbox = nativeRow('cbCheckbox').cbCheckbox;
++  assert.equal(ui.A11yOptionsControl(other), null);
++  assert.equal(ui.A11yActionProxy(other), other);
++});
++test('visible native descriptions remain readable and option subclasses work', () => {
++  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = [];
++  row.kind = 'widgets.OptionsMenu.controls::GameplayTabOptionsCellView';
++  row.txtDescription.visible = true;
++  ui.A11yOptionsRowLabel(row, lines);
++  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes', '0|0|Explanation']);
++});
++test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
++  assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
++});
++console.log(checks + ' Options simplified checks passed (not in-game verification).');

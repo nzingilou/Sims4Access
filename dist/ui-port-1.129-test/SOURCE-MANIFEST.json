@@ -1,0 +1,26 @@
+{
+  "git_base": "4ce00a423d2ae7a63cdf22388d4b742ab681b093",
+  "patch_sha256": "d0d4a9c49900d74bde0107fcb34863259ee6a40c1c7bc0b1204d992bed1b5f19",
+  "files": [
+    {
+      "path": "flash/TooltipManager_patched.as",
+      "before_sha256": "44c79ed62239ee5ff35a48b3ee19ec3d365c2a13a2af683013979ae8bedb5eb6",
+      "after_sha256": "9653ba04fa5e51eb86e87d5531536903c4a025e3deaffcd25e8cf79955c15dcc"
+    },
+    {
+      "path": "tools/test_options_simplified.js",
+      "before_sha256": "565e6cfa7c362fcce9fdcb43e0dbf31e7bbdab15ebc3d18baaf7494bdae902b9",
+      "after_sha256": "de113e81d082548f5eada79d3ec2dc5c3737c8a332c74d181415104fbd37d977"
+    },
+    {
+      "path": "tools/test_event_activation_v13.js",
+      "before_sha256": "fe797b167a1991bb35cfd7ed21263bb589cde5e9719d4992a0d5a8b054c0742f",
+      "after_sha256": "e93040777817b4643868f08c4c760d4bbe73c2f4ecfb15b166bb368fc1d05e0c"
+    },
+    {
+      "path": "docs/development/changes/options-settings.md",
+      "before_sha256": null,
+      "after_sha256": "9d6f52e1aa6c1c5e9b1a2ac145958dc306b05a3f060db491c1200025d9f378da"
+    }
+  ]
+}

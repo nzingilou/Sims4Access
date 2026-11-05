@@ -1,13 +1,11 @@
-# UI port manifest
+# Settings fix manifest
 
-Base: Git d7c59d5. Game 1.129.39.1030. In-game panel verification pending.
+Base: Git 4ce00a4. Game 1.129.39.1030.
 
-- flash/TooltipManager_patched.as, around 3187, 3470, 6344, 6430, 6456 and 6830: occult rank/points; blocked-cart feedback; native ability/transfer controls; direct Needs/Simology/Aspirations traversal; skip empty occult slots and linked controller highlights.
-- flash/extra-classes/CommodityContainer.as, around 160: trait-dependent need names and bounded percentages.
-- flash/extra-classes/DialogMain.as, around 568: retain EA allowDuringLoading saving-dialog behavior.
-- flash/prepare_uicheats_purchase.py and build_uicheats_compat.ps1: preserve UI Cheats' right-click ten-item quantities with narration.
-- tools/ui_port_*, ui_bridge_inventory.py and regression fixtures: source/structure/handler verification, scanner picks, purchase controls and nested panel traversal.
+- flash/TooltipManager_patched.as: A11yOptionsControl / A11yOptionsRowLabel (around 6102): native control targeting and visible row text. A11yActionProxy (6765) and A11yActivate (7570): native activation and settled checkbox reread. A11yCheckboxState (7717): current visible checkbox state only.
+- tools/test_options_simplified.js: option types, disabled targets, values, states, descriptions and subclasses. tools/test_event_activation_v13.js: inspect the complete proxy branch instead of a fixed character count; retain disabled/refused-click and single-dispatch checks.
+- docs/development/changes/options-settings.md: reproduction and focused test instructions.
 
-Validation: 111 suites, 1,497 reported checks, passed with stable inputs. All 25 standard and 6 compatibility movies rebuilt; fidelity gates passed 62 and 19 targeted comparisons. Original non-code tags and class sets retained. 39 routing methods and the updated panel helpers/purchase guard match across all 29 shared-manager copies.
+Validation: 113 suites / 1,531 reported checks passed with stable inputs; standard and compatibility fidelity gates passed. Class sets and non-code tags retained. Settings/routing helpers match across 29 compiled copies. Source review limits changes to four existing manager methods and one addition.
 
-Rollback: restore the previous paired UI packages, or reverse CHANGES.patch against its recorded source state. SOURCE-MANIFEST.json records exact before/after hashes. Python scripts are unchanged.
+Rollback: restore the previous paired UI packages, or reverse CHANGES.patch against its recorded source state. SOURCE-MANIFEST.json records exact source hashes. In-game settings verification remains pending.

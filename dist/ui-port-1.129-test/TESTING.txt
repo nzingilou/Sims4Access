@@ -1,17 +1,7 @@
-UI port test candidate for game 1.129.39.1030
+Game Options fix for game 1.129.39.1030
 
-Use with your current contribution ts4script. This candidate contains UI package changes.
+Close the game before replacing packages. TS4_Access_UI.package goes in Mods/TS4_Access. With UI Cheats, TS4_Access_Compatibility_UICheats.package goes in the existing higher-priority Mods/_Overrides folder. Keep your current script and settings. Back up the previous UI pair first and clear localthumbcache.package after replacement.
 
-With the game closed, back up your existing UI packages. Replace TS4_Access_UI.package in Mods/TS4_Access. If UI Cheats is installed, also replace TS4_Access_Compatibility_UICheats.package in your higher-priority override folder. Your current Resource.cfg uses Mods/_Overrides for that purpose.
+In Gameplay, Enter on Auto Age (Played Households) should open the native choices; arrows and Enter select a value. Enter or Space on Auto Age (Unplayed Households) should toggle and read its state. Use Apply Changes to save. Check a Pack Settings checkbox and an Audio/Graphics control as well. Close Options and verify scanner Enter still opens an object's menu.
 
-Test scanner Enter on an object and a Sim, then close the pie menu and navigate again. Check opening a dialog and returning to the scanner. Check build-grid/catalog navigation and CAS entry.
-
-In needs, use the existing Tab/arrow navigation to read occult meters, rank/points, and the native powers button. In the powers screen, navigate individual abilities; selection and confirmation remain the game's own actions.
-
-In Manage Worlds transfer, reach the neighborhood expand button and its visible destination households. Check purchase-books row navigation and quantities; with UI Cheats, check its right-click quantity behavior too.
-
-Gallery description/filter improvements remain a documented follow-up. Capture the mod log if a flow fails. To roll back, close the game and restore the UI packages you backed up.
-
-Purchase sequence: Right adds quantity and Left removes it. Enter on an item reaches Done only when confirmation is available; press Enter on Done to confirm. An empty or unaffordable cart now reads its reason while keeping the item focused.
-
-Panel regression checks: Tab and both arrow pairs should leave temperaments/traits/goals for later sections; Shift+Tab and reverse arrows should return. Reach all six needs, rank/points and Powers; later Simology sections; Aspirations selection and Rewards. Sim Profile should omit Controller Highlight stops. Expand/collapse remains Enter on the native section button. Capture a11y.inspect_ui if a control remains unreachable.
+To roll back, close the game and restore the backed-up UI pair.

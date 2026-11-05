@@ -36,9 +36,13 @@ test('Activation speaks the unavailable token when the proxy click is refused',(
  const activate=body('A11yActivate').text;
  const branch=activate.indexOf('if(this.A11yActionProxy(_loc2_) != _loc2_)');
  assert(branch>=0,'proxy branch present');
- const window=activate.slice(branch,branch+600);
+ // Inspect the entire proxy branch: settings' settled reread can make
+ // it longer than the old arbitrary 600-character window.
+ const end=activate.indexOf('if(this.A11yInformational(_loc2_)',branch);
+ assert(end>branch,'next activation branch present');
+ const window=activate.slice(branch,end);
  assert(/if\(!this\.A11yClickControl\(this\.A11yActionProxy\(_loc2_\)\)\)\s*\{\s*this\.A11yPostToPython\("a11y\.widget_enc",encodeURIComponent\("0\|0\|action unavailable"\)\);\s*\}/.test(window),'refused click is announced');
- assert(/return;/.test(window),'branch still returns');
+ assert(/return;\s*}\s*$/.test(window),'proxy branch returns before generic dispatch');
 });
 test('Disabled proxy targets are still refused by A11yClickControl',()=>{
  const click=method('A11yClickControl');

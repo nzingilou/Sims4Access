@@ -6096,6 +6096,28 @@ package olympus.core
       // focused dropdown button says only its value (2026-09-26 live: the
       // Autonomy and Auto Age rows read as bare Off and Yes). Checkbox rows
       // are whole-cell stops that already read their label.
+      // Native option cells own labels, but only their visible child owns
+      // activation. Keep disabled controls as targets so EA's enabled guard
+      // remains authoritative. No direct setting writes or synthetic toggles.
+      public function A11yOptionsControl(item:DisplayObject) : DisplayObject
+      {
+         var name:String = item != null ? getQualifiedClassName(item) : "";
+         var control:DisplayObject = null;
+         var fields:Array = ["cbCheckbox","ddDropdown","tbTextButton"];
+         var index:int = 0;
+         if(name.indexOf("widgets.OptionsMenu.controls::") != 0 || name.indexOf("OptionsCellView") < 0) { return null; }
+         while(index < fields.length)
+         {
+            if(fields[index] in item)
+            {
+               control = Object(item)[fields[index]] as DisplayObject;
+               if(this.A11yIsLive(control)) { return control; }
+            }
+            index = index + 1;
+         }
+         return null;
+      }
+
       public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
       {
          var node:DisplayObject = item;
@@ -6109,6 +6131,18 @@ package olympus.core
             {
                if("lbLabel" in node && "ddDropdown" in node)
                {
+                  if(node == item && getQualifiedClassName(node).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(node).indexOf("OptionsCellView") >= 0)
+                  {
+                     // Focused rows used to read hidden checkbox/button artwork
+                     // ("Ok", "Label Name") alongside the actual setting.
+                     result.length = 0;
+                     var control:DisplayObject = this.A11yOptionsControl(node);
+                     this.A11yCollectText(Object(node)["lbLabel"] as DisplayObject,result,1,true);
+                     if(control != null && getQualifiedClassName(control).indexOf("Checkbox") < 0) { this.A11yCollectText(control,result,1,true); }
+                     if("txtDescription" in node) { this.A11yCollectText(Object(node)["txtDescription"] as DisplayObject,result,1,true); }
+                     if("txtInformation" in node) { this.A11yCollectText(Object(node)["txtInformation"] as DisplayObject,result,1,true); }
+                     return;
+                  }
                   if(!this.A11yIsInside(item,Object(node)["ddDropdown"] as DisplayObject)) { return; }
                   label = Object(node)["lbLabel"];
                   if(label == null || !label["visible"] || !("textField" in label)) { return; }
@@ -6733,6 +6767,11 @@ package olympus.core
       public function A11yActionProxy(item:DisplayObject) : DisplayObject
       {
          if(item == null) { return null; }
+         if(getQualifiedClassName(item).indexOf("widgets.OptionsMenu.controls::") == 0)
+         {
+            var option:DisplayObject = this.A11yOptionsControl(item);
+            if(option != null) { return option; }
+         }
          if(this.mA11ySimplifiedMenus && this.A11ySaveChoice(item)) { return Object(item)["btnPlay"] as DisplayObject; }
          if(item.parent != null && "mcFilterBubble" in item.parent && Object(item.parent)["mcFilterBubble"] == item) { return Object(item.parent)["btnFilterPanel"] as DisplayObject; }
          if("btnSolve" in item) { return Object(item)["btnSolve"] as DisplayObject; }
@@ -7571,6 +7610,7 @@ package olympus.core
                // fail silently; the narrator translates this token. Ordinary
                // disabled controls still read EA's own reason.
                if(!this.A11yClickControl(this.A11yActionProxy(_loc2_))) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
+               else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0) { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
                return;
             }
             if(this.A11yInformational(_loc2_) && !this.A11yIsFocusable(_loc2_)) { this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return; }
@@ -7683,6 +7723,11 @@ package olympus.core
          var _loc5_:* = undefined;
          try
          {
+            if(param1 != null && getQualifiedClassName(param1).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(param1).indexOf("OptionsCellView") >= 0)
+            {
+               var option:DisplayObject = this.A11yOptionsControl(param1);
+               return option != null && getQualifiedClassName(option).indexOf("Checkbox") >= 0 ? this.A11yCheckboxState(option) : "";
+            }
             if(this.A11ySingleFilterLabel(param1) == param1 && param1 != null)
             {
                return this.A11yCheckboxState(Object(param1.parent)["btnCheckBox"]);

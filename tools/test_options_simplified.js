@@ -47,6 +47,8 @@ function method(name) {
   while (depth) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; end++; }
   const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|Rectangle|Boolean|Number|String|Object|Array|int|Error)\b/g;
   const body = source.slice(start, end - 1).replace(types, '')
+    .replace(/:\s*\*/g, '')
+    .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
     .replace(/\s+as\s+Rectangle\b/g, '')
     .replace(/((?:Object\([\w.]+\)|[\w.]+)(?:\[[\w."]+\])*)\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)/g, 'asCast($1,$2)')
     .replace(/\bis\s+(TextField|DisplayObjectContainer)\b/g, 'instanceof $1');
@@ -170,4 +172,78 @@ test('focus and widget announcements call the row label decorator', () => {
   assert(/this\.A11yMoveInQuote\(param1,_loc2_\);( this\.A11yTransferQuote\(param1,_loc2_\); this\.A11yMoveLabel\(param1,_loc2_\);)? this\.A11yOptionsRowLabel\(param1,_loc2_\);/.test(source));
 });
 
+const optionControl = method('A11yOptionsControl');
+const optionState = method('A11yCheckboxState');
+const actionProxy = method('A11yActionProxy');
+function nativeRow(type) {
+  const row = new DisplayObjectContainer('row', 'widgets.OptionsMenu.controls::OptionsCellView');
+  row.lbLabel = row.add(new DisplayObjectContainer('lbLabel', 'olympus.controls::JustifiedLabel'));
+  row.lbLabel.textField = row.lbLabel.add(new TextField('textField', 'Auto Age:'));
+  for (const [name, kind] of [['cbCheckbox', 'Checkbox'], ['ddDropdown', 'DropdownButton'], ['tbTextButton', 'TextButton']]) {
+    row[name] = row.add(new DisplayObjectContainer(name, 'olympus.gui.buttons::' + kind));
+    row[name].visible = name === type; row[name].enabled = true;
+    row[name].add(new TextField('text', name === 'ddDropdown' ? 'Yes' : 'Ok'));
+  }
+  row.cbCheckbox.Selected = true;
+  row.txtDescription = row.add(new TextField('txtDescription', 'Explanation')); row.txtDescription.visible = false;
+  row.txtInformation = row.add(new TextField('txtInformation', 'Information')); row.txtInformation.visible = false;
+  return row;
+}
+function optionUi() {
+  const ui = labelUi();
+  ui.A11yIsLive = value => !!value && value.visible;
+  ui.A11yOptionsControl = optionControl.bind(ui);
+  ui.A11ySingleFilterLabel = () => null;
+  ui.A11yPickerToggleCell = () => false;
+  ui.A11yCheckboxState = optionState.bind(ui);
+  ui.A11yActionProxy = actionProxy.bind(ui);
+  ui.A11yCollectText = (value, lines) => {
+    if (!value || !value.visible) return;
+    if (value instanceof TextField) lines.push('0|0|' + value.text);
+    else for (const child of value.children || []) ui.A11yCollectText(child, lines);
+  };
+  return ui;
+}
+test('each option type routes to its visible native control, including disabled controls', () => {
+  const ui = optionUi();
+  for (const type of ['cbCheckbox', 'ddDropdown', 'tbTextButton']) {
+    const row = nativeRow(type);
+    assert.equal(ui.A11yActionProxy(row), row[type]);
+    row[type].enabled = false;
+    assert.equal(ui.A11yActionProxy(row), row[type]);
+  }
+});
+test('dropdowns never announce hidden checkbox state or hidden placeholder text', () => {
+  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = ['old hidden Ok'];
+  ui.A11yOptionsRowLabel(row, lines);
+  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes']);
+  assert.equal(ui.A11yCheckboxState(row), '');
+});
+test('checkbox reads current selection without its unlabelled Ok artwork', () => {
+  const ui = optionUi(), row = nativeRow('cbCheckbox'), lines = [];
+  ui.A11yOptionsRowLabel(row, lines);
+  assert.deepStrictEqual(lines, ['0|0|Auto Age:']);
+  assert.equal(ui.A11yCheckboxState(row), 'checked');
+  row.cbCheckbox.Selected = false;
+  assert.equal(ui.A11yCheckboxState(row), 'unchecked');
+});
+test('description rows and unrelated controls do not acquire an action or checkbox state', () => {
+  const ui = optionUi(), row = nativeRow(null);
+  assert.equal(ui.A11yOptionsControl(row), null);
+  assert.equal(ui.A11yCheckboxState(row), '');
+  const other = new DisplayObject('other', 'widgets.Pickers::OptionsCellView');
+  other.cbCheckbox = nativeRow('cbCheckbox').cbCheckbox;
+  assert.equal(ui.A11yOptionsControl(other), null);
+  assert.equal(ui.A11yActionProxy(other), other);
+});
+test('visible native descriptions remain readable and option subclasses work', () => {
+  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = [];
+  row.kind = 'widgets.OptionsMenu.controls::GameplayTabOptionsCellView';
+  row.txtDescription.visible = true;
+  ui.A11yOptionsRowLabel(row, lines);
+  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes', '0|0|Explanation']);
+});
+test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
+  assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
+});
 console.log(checks + ' Options simplified checks passed (not in-game verification).');
