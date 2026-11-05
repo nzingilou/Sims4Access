@@ -54,4 +54,7 @@ manager.A11yOnGameMessage('A11y|scannermode|off'); assert.strictEqual(manager.mA
 requestId = 0xffffffff;
 manager.A11yOnGameMessage('A11y|pick|9|1|77||0|0|0|0');
 assert.strictEqual(requestId, 1); assert.strictEqual(requests.at(-1)[1].commandArgs[10], 1); checks++;
+manager.A11yOnGameMessage('A11y|pick|0|5|77||10.25|6.5|-4.125|2');
+assert.deepStrictEqual(Array.from(requests.at(-1)[1].commandArgs), ['0',5,10.25,6.5,-4.125,77,2,0,0,0,2,0,0,true]);
+assert.strictEqual(pie.mPickResults.pickType,5);checks++;
 console.log(checks + ' scanner pick bridge checks passed (native services mocked).');

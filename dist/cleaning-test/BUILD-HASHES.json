@@ -1,0 +1,71 @@
+{
+  "source_base": "38dc3c6c3a3e1851f2eb3631111a3f6436d26b4c",
+  "status": "offline-validated candidate; in-game floor-action and diagnostic testing pending",
+  "python": "3.7.9",
+  "base_script_sha256": "bc6e720c16be1dcfdc0115566b5098ac68d2a5092eb5334f2559fa25e1ab049d",
+  "changed_archive_entries": [
+    "tyjokr_a11y_hub.pyc"
+  ],
+  "added_archive_entries": [
+    "tyjokr_a11y_ground.pyc"
+  ],
+  "other_archive_entries_unchanged": 56,
+  "unchanged_hub_functions": [
+    "_say",
+    "_name",
+    "_client",
+    "_ui",
+    "_window",
+    "select_sim",
+    "household",
+    "funds_text",
+    "funds",
+    "read_clock",
+    "scanner_help",
+    "self_interactions",
+    "_queue_entries",
+    "_queue_interaction",
+    "_queue_detail",
+    "action_queue",
+    "cancel_actions",
+    "_currency",
+    "_price_text",
+    "_inventory_item",
+    "_sellable",
+    "_sell_price",
+    "inventory_item_menu",
+    "_checked_item",
+    "confirm_sell_all",
+    "sell_inventory_item",
+    "sell_window",
+    "_situation_manager",
+    "_events",
+    "_guests",
+    "_event_detail",
+    "events_window",
+    "_event",
+    "event_actions",
+    "end_event",
+    "a11y_events",
+    "a11y_invitem_enc",
+    "_build_action",
+    "build_actions",
+    "a11y_hub",
+    "a11y_buildmenu",
+    "a11y_household",
+    "a11y_funds"
+  ],
+  "files": {
+    "TS4_Access.ts4script": "d8a5ebc7312a03d4f3edb8e6c3d060205af6ae017a6c5dc3a70918cffaf9e21a",
+    "S4Access-Cleaning-Diagnostic.ts4script": "e11c78968b41556beb5ccbeb71f24c5930df12f09b38f026833d8f5b526b4c4a"
+  },
+  "source_hashes": {
+    "Scripts/tyjokr_a11y_hub.py": "c537a2686c129654c520fd91ca03d6a02c9bd20b3be2c057fe75e09ab448002e",
+    "Scripts/tyjokr_a11y_ground.py": "f97261c7ddcc02181d6fe1ae55b8c2f79f4ab18cca6aa8fcbbb4bdfbaf2f0994",
+    "diagnostics/tyjokr_a11y_cleaning_diagnostic.py": "bd55334a1ae583c2148fd94bed6cdc7a52378637ddd3fa898d63f6f8decb9a5b"
+  },
+  "regression_suites": 113,
+  "reported_checks": 1525,
+  "passed": true,
+  "input_stable": true
+}

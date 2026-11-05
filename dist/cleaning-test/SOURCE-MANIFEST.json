@@ -1,0 +1,46 @@
+{
+  "git_base": "38dc3c6c3a3e1851f2eb3631111a3f6436d26b4c",
+  "patch_sha256": "12d064074ee23206b0d7643e22047f4935d338f587b88ecf95468750e9828f52",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_ground.py",
+      "before_sha256": null,
+      "after_sha256": "f97261c7ddcc02181d6fe1ae55b8c2f79f4ab18cca6aa8fcbbb4bdfbaf2f0994"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_hub.py",
+      "before_sha256": "dbc870cb4ba4db56a2c0d7671905809b83dfc573205dfc305410eb0436dd409a",
+      "after_sha256": "c537a2686c129654c520fd91ca03d6a02c9bd20b3be2c057fe75e09ab448002e"
+    },
+    {
+      "path": "diagnostics/tyjokr_a11y_cleaning_diagnostic.py",
+      "before_sha256": null,
+      "after_sha256": "bd55334a1ae583c2148fd94bed6cdc7a52378637ddd3fa898d63f6f8decb9a5b"
+    },
+    {
+      "path": "docs/development/changes/cleaning-diagnostic.md",
+      "before_sha256": null,
+      "after_sha256": "21934829ac25cdfa8e6f547ea64039740fec72ec8c8f39315b4e66e2e14200a2"
+    },
+    {
+      "path": "docs/development/changes/floor-actions.md",
+      "before_sha256": null,
+      "after_sha256": "14256daae7d3a842cb1a0e6f62b1d7e8357924e1b9617cef1cf2a17c959d09d2"
+    },
+    {
+      "path": "tools/test_cleaning_diagnostic.py",
+      "before_sha256": null,
+      "after_sha256": "ef9071686f4586d6a66986db8f11a8aeefdb1b8ce9e68f25c965fadc09a75dca"
+    },
+    {
+      "path": "tools/test_ground_actions.py",
+      "before_sha256": null,
+      "after_sha256": "683054583769e74b71ce0b88c6bf3efecf1048e7fbd77be3230c7fbe7a810aa1"
+    },
+    {
+      "path": "tools/test_scanner_pick_bridge.js",
+      "before_sha256": "e8120de04c571bd3ef1a6c35cc2345ca4ae95d9948c85b7dd9cbdc68e92974eb",
+      "after_sha256": "18d8b2d4e1c63069c5359714194dedc7ee650012ce21e9b2f3bca3efaceb2c75"
+    }
+  ]
+}

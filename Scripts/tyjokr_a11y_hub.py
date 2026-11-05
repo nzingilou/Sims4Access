@@ -171,6 +171,11 @@ def scanner_help():
     return shortcuts.speak()
 
 
+def floor_interactions():
+    import tyjokr_a11y_ground as ground
+    return ground.open_floor_menu()
+
+
 def self_interactions():
     import services
     import tyjokr_a11y_scanner as scanner
@@ -696,7 +701,7 @@ def open_hub():
     for label, callback in (
             (('action queue', action_queue), ('events', events_window), ('businesses', business.businesses_window)) +
             pack_rows +
-            (('self interactions', self_interactions),
+            (('self interactions', self_interactions), ('Floor actions here', floor_interactions),
              ('household sims', household), ('household funds', funds),
              ('day and time', read_clock),
              ('known contacts', contacts.open_contacts)) + build_rows +
