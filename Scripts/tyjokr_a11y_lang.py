@@ -12,6 +12,8 @@ Translations are first-pass; refine per-language as feedback arrives.
 _TRANSLATIONS = {
     'scanner category': {'en': 'Category', 'pl': 'Kategoria'},
     'scanner subcategory': {'en': 'Subcategory', 'pl': 'Podkategoria'},
+    'scanner dirty': {'en': 'dirty', 'pl': 'brudny'},
+    'scanner dusty': {'en': 'dusty', 'pl': 'zakurzony'},
     'phone': {'en': 'Phone', 'pl': 'Telefon'},
     # --- settings menu (tyjokr_a11y_menu) ---
     'on': {

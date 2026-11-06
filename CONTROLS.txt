@@ -13,6 +13,8 @@ Turn Scanner mode on in settings or press Ctrl+Alt+Space.
 Keyboard navigation and the scanner feature must also be enabled.
 Wait for "Scanner". Use these keys without holding Ctrl or Alt:
 
+Objects announce dirty or dusty when their current native state reports it.
+
 Up: Previous item in the current list.
 Down: Next item in the current list.
 Right: Enter a category or subcategory. On an item, repeat it.

@@ -1,0 +1,36 @@
+{
+  "git_base": "0766e12d402b8bf5f679e95fa321b3c726e9c65b",
+  "patch_sha256": "38b7e2fa2f19ae997811d23269e22526db5d426b7c869c5179b966d8adff1485",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_cleanliness.py",
+      "before_sha256": null,
+      "after_sha256": "35f3e0f239108b2049afd58709fc846e8e5cfc57066a26adc8446a666e888bab"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_scanner.py",
+      "before_sha256": "1192c746ecfcceb75a1454593b81f7e8f7f5deab9d55caeffc46bf568e2950d1",
+      "after_sha256": "77687cdb835248630dc4c8932a153f0c8ca3b24aa40f6e185f302cb451120d4d"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_lang.py",
+      "before_sha256": "d2f1921c4be59957379da7a8f387ba89fdfffd5da8838e8cd04bae3027e025fc",
+      "after_sha256": "36ad7f58c5fd5918df5565ade2f9f8caa52eb2703d986fe6bde504eba0be7511"
+    },
+    {
+      "path": "tools/test_cleanliness.py",
+      "before_sha256": null,
+      "after_sha256": "2cf691fa3b1f171acd80ee4fc6f5bb2329ef966783ba0f9777af976fd84737b0"
+    },
+    {
+      "path": "docs/development/changes/scanner-cleanliness.md",
+      "before_sha256": null,
+      "after_sha256": "1eab532df97ee50e37ac2e283e4e42fd61f35860b8dc9fc838830992575da314"
+    },
+    {
+      "path": "CONTROLS.txt",
+      "before_sha256": "4fb7dee2f9e32e603bee98b3eadc4073992caae6109db295bd4cc43e3e8490c0",
+      "after_sha256": "6a7b491644d8e97acef34838863ecd530dc2ea152c719e288126de633050bbec"
+    }
+  ]
+}

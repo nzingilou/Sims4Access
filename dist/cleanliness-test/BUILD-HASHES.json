@@ -1,0 +1,21 @@
+{
+  "git_base": "0766e12d402b8bf5f679e95fa321b3c726e9c65b",
+  "python": "3.7.9",
+  "base_script_sha256": "3832c10b86e39cab9d595223086e2042211821f0f2ee60a8018f36ae9b3006de",
+  "changed_entries": [
+    "tyjokr_a11y_scanner.pyc",
+    "tyjokr_a11y_lang.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_cleanliness.pyc"
+  ],
+  "unchanged_entries": 57,
+  "unchanged_scanner_code_objects": 69,
+  "scanner_module_bootstrap_preserved": true,
+  "regression_suites": 115,
+  "reported_checks": 1561,
+  "status": "offline validated; in-game announcement verification pending",
+  "files": {
+    "TS4_Access.ts4script": "1c828606fe5a297bfd971bb2b8c2ad3432ff84c7e09ae27de33ccebcc5447560"
+  }
+}

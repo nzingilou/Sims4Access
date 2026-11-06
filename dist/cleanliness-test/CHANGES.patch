@@ -1,0 +1,204 @@
+diff --git a/CONTROLS.txt b/CONTROLS.txt
+index c82b52c..4f97283 100644
+--- a/CONTROLS.txt
++++ b/CONTROLS.txt
+@@ -13,6 +13,8 @@ Turn Scanner mode on in settings or press Ctrl+Alt+Space.
+ Keyboard navigation and the scanner feature must also be enabled.
+ Wait for "Scanner". Use these keys without holding Ctrl or Alt:
+ 
++Objects announce dirty or dusty when their current native state reports it.
++
+ Up: Previous item in the current list.
+ Down: Next item in the current list.
+ Right: Enter a category or subcategory. On an item, repeat it.
+diff --git a/Scripts/tyjokr_a11y_cleanliness.py b/Scripts/tyjokr_a11y_cleanliness.py
+new file mode 100644
+index 0000000..79483d5
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_cleanliness.py
+@@ -0,0 +1,43 @@
++"""Read-only scanner suffixes for native dirt/dust states verified in-game.
++
++Only reads current state values at announcement time. No interaction tests,
++state writes, scan refreshes, object filtering or cached dirtiness.
++"""
++from itertools import islice
++import tyjokr_a11y_lang as lang
++import tyjokr_a11y_speech as speech
++
++_errors_logged = 0
++
++
++def suffix(entry):
++    global _errors_logged
++    if entry.is_sim:
++        return ''
++    try:
++        import services
++        obj = services.object_manager().get(entry.obj_id)
++        component = getattr(obj, 'state_component', None)
++        if component is None:
++            return ''
++        current = {}
++        for value in islice(component.values(), 64):
++            state_id = getattr(getattr(value, 'state', None), 'guid64', None)
++            if state_id in (15129, 15128, 255045):
++                current[state_id] = getattr(value, 'guid64', None)
++        # DirtyState is the visual state. Prefer it over the linked dirtiness
++        # commodity's state when both exist, including transient disagreement.
++        dirty = (current[15129] == 15131 if 15129 in current else current.get(15128) == 15133)
++        terms = []
++        if dirty:
++            terms.append(lang.t('scanner dirty'))
++        if current.get(255045) == 255050:
++            terms.append(lang.t('scanner dusty'))
++        return ''.join(', ' + term for term in terms)
++    except Exception as exc:
++        # A malformed/removed object must not interrupt scanner navigation.
++        # Bound failure logging rather than reporting every repeated keypress.
++        if _errors_logged < 5:
++            _errors_logged += 1
++            speech.log_line('cleanliness: state read failed for {}: {}'.format(entry.obj_id, type(exc).__name__))
++        return ''
+diff --git a/Scripts/tyjokr_a11y_lang.py b/Scripts/tyjokr_a11y_lang.py
+index 0d0f230..f4d0dde 100644
+--- a/Scripts/tyjokr_a11y_lang.py
++++ b/Scripts/tyjokr_a11y_lang.py
+@@ -12,6 +12,8 @@ Translations are first-pass; refine per-language as feedback arrives.
+ _TRANSLATIONS = {
+     'scanner category': {'en': 'Category', 'pl': 'Kategoria'},
+     'scanner subcategory': {'en': 'Subcategory', 'pl': 'Podkategoria'},
++    'scanner dirty': {'en': 'dirty', 'pl': 'brudny'},
++    'scanner dusty': {'en': 'dusty', 'pl': 'zakurzony'},
+     'phone': {'en': 'Phone', 'pl': 'Telefon'},
+     # --- settings menu (tyjokr_a11y_menu) ---
+     'on': {
+diff --git a/Scripts/tyjokr_a11y_scanner.py b/Scripts/tyjokr_a11y_scanner.py
+index 9633e4f..260e45a 100644
+--- a/Scripts/tyjokr_a11y_scanner.py
++++ b/Scripts/tyjokr_a11y_scanner.py
+@@ -753,10 +753,11 @@ def _place_part(entry):
+ 
+ 
+ def _entry_parts(entry, index, total):
++    import tyjokr_a11y_cleanliness as cleanliness
+     status = ', ' + lang.t('scanner unavailable') if entry.availability == 'locked' else ''
+     if entry.role:
+         status = ', ' + entry.role + status
+-    return [_name_part(entry), status + ', ' + _place_part(entry),
++    return [_name_part(entry), cleanliness.suffix(entry) + status + ', ' + _place_part(entry),
+             '. {} {} {}.'.format(index + 1, lang.t('of'), total)]
+ 
+ 
+@@ -789,7 +790,8 @@ def _group_parts():
+             parts.append(sub)
+             parts.append(_sub_count_part(entries, entry))
+         parts.append(_name_part(entry))
+-        parts.append((', ' + entry.role if entry.role else '') + ', ' + _place_part(entry) + '.')
++        import tyjokr_a11y_cleanliness as cleanliness
++        parts.append(cleanliness.suffix(entry) + (', ' + entry.role if entry.role else '') + ', ' + _place_part(entry) + '.')
+     return parts
+ 
+ 
+diff --git a/docs/development/changes/scanner-cleanliness.md b/docs/development/changes/scanner-cleanliness.md
+new file mode 100644
+index 0000000..da19f56
+--- /dev/null
++++ b/docs/development/changes/scanner-cleanliness.md
+@@ -0,0 +1,11 @@
++# Scanner cleanliness announcements
++
++- `Scripts/tyjokr_a11y_cleanliness.py`: separate read-only suffix reader, bounded to 64 current state values. Native DirtyState takes precedence over its linked commodity state; dust is a separate suffix. Missing objects/unknown states give no label; failures leave speech/navigation intact and log at most five read errors.
++- `Scripts/tyjokr_a11y_scanner.py`, `_entry_parts` around 755 and `_group_parts` around 777: add the suffix only when composing object speech. No changes to scanning, filtering, category membership, refresh, ordering or selection.
++- `Scripts/tyjokr_a11y_lang.py`: dirty/dusty vocabulary. CONTROLS.txt: spoken status documentation. `tools/test_cleanliness.py`: native-state cases, live re-read, bounds/errors and both scanner announcement paths.
++
++Native evidence from a complete 138-object snapshot: a dirty toilet had DirtyState 15129/value 15131 and Dirty 15128/value 15133. Clean fixtures had values 15130/15132. A dusty desk had DustLevel_ObjectState 255045/value 255050 while both dirtiness states were clean; clean dust value was 255048. No Clean affordance test or name guessing is used.
++
++Live check: hear the dirty toilet in the scanner; clean it normally, then repeat its announcement and verify the suffix clears. Verify a clean sink remains unlabelled and the dusty desk says dusty. In-game speech/cleaning transition confirmation remains pending.
++
++Rollback: restore the previous script archive, or reverse the patch and remove the cleanliness module.
+diff --git a/tools/test_cleanliness.py b/tools/test_cleanliness.py
+new file mode 100644
+index 0000000..9f221c7
+--- /dev/null
++++ b/tools/test_cleanliness.py
+@@ -0,0 +1,79 @@
++"""Current native cleaning states change speech, never scanner structure."""
++import ast
++import importlib.util
++from pathlib import Path
++import sys,types,unittest
++from unittest.mock import Mock
++
++ROOT=Path(__file__).resolve().parents[1]
++objects={};manager=types.SimpleNamespace(get=lambda ident:objects.get(ident))
++speech=types.SimpleNamespace(log_line=Mock())
++sys.modules.update(services=types.SimpleNamespace(object_manager=lambda:manager),
++ tyjokr_a11y_lang=types.SimpleNamespace(t=lambda s:{'scanner dirty':'dirty','scanner dusty':'dusty'}.get(s,s)),
++ tyjokr_a11y_speech=speech)
++spec=importlib.util.spec_from_file_location('cleanliness',str(ROOT/'Scripts/tyjokr_a11y_cleanliness.py'))
++module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
++sys.modules['tyjokr_a11y_cleanliness']=module
++def value(state,ident):return types.SimpleNamespace(state=types.SimpleNamespace(guid64=state),guid64=ident)
++
++class CleaningTests(unittest.TestCase):
++ def setUp(self):
++  objects.clear();speech.log_line.reset_mock();module._errors_logged=0
++  self.entry=types.SimpleNamespace(obj_id=5,is_sim=False)
++ def set(self,*states):
++  objects[5]=types.SimpleNamespace(state_component=types.SimpleNamespace(values=lambda:iter(states)))
++ def test_dirty_toilet_snapshot(self):
++  self.set(value(15128,15133),value(15129,15131),value(255045,255048))
++  self.assertEqual(module.suffix(self.entry),', dirty')
++ def test_clean_sink_snapshot(self):
++  self.set(value(15128,15132),value(15129,15130),value(255045,255048))
++  self.assertEqual(module.suffix(self.entry),'')
++ def test_dusty_desk_is_not_dirty(self):
++  self.set(value(15128,15132),value(15129,15130),value(255045,255050))
++  self.assertEqual(module.suffix(self.entry),', dusty')
++ def test_both_native_conditions(self):
++  self.set(value(15129,15131),value(255045,255050))
++  self.assertEqual(module.suffix(self.entry),', dirty, dusty')
++ def test_state_is_read_again_after_cleaning(self):
++  self.set(value(15129,15131));self.assertEqual(module.suffix(self.entry),', dirty')
++  self.set(value(15129,15130));self.assertEqual(module.suffix(self.entry),'')
++ def test_visual_clean_state_wins_over_transient_commodity_dirty(self):
++  self.set(value(15129,15130),value(15128,15133));self.assertEqual(module.suffix(self.entry),'')
++ def test_verified_commodity_fallback_when_visual_state_absent(self):
++  self.set(value(15128,15133));self.assertEqual(module.suffix(self.entry),', dirty')
++ def test_unknown_states_and_names_are_not_guessed(self):
++  self.set(value(999,15131),value(15129,999),value(255045,999))
++  self.assertEqual(module.suffix(self.entry),'')
++ def test_missing_object_or_component(self):
++  self.assertEqual(module.suffix(self.entry),'');objects[5]=object()
++  self.assertEqual(module.suffix(self.entry),'')
++ def test_sims_never_access_object_manager(self):
++  self.entry.is_sim=True;self.assertEqual(module.suffix(self.entry),'')
++ def test_read_errors_do_not_break_navigation_and_logs_are_bounded(self):
++  objects[5]=types.SimpleNamespace(state_component=types.SimpleNamespace(values=Mock(side_effect=ValueError)))
++  for _ in range(10):self.assertEqual(module.suffix(self.entry),'')
++  self.assertEqual(speech.log_line.call_count,5)
++ def test_state_iteration_is_bounded(self):
++  seen=[]
++  def states():
++   for i in range(1000):seen.append(i);yield value(999,i)
++  objects[5]=types.SimpleNamespace(state_component=types.SimpleNamespace(values=states))
++  self.assertEqual(module.suffix(self.entry),'');self.assertEqual(len(seen),64)
++ def production(self,name,namespace):
++  tree=ast.parse((ROOT/'Scripts/tyjokr_a11y_scanner.py').read_text(encoding='utf-8-sig'))
++  fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
++  exec(compile(ast.Module(body=[fn]),'<scanner announcement>','exec'),namespace)
++  return namespace[name]
++ def test_scanner_preserves_localized_name_availability_and_place(self):
++  self.set(value(15129,15131));self.entry.availability='locked';self.entry.role=''
++  ns={'lang':sys.modules['tyjokr_a11y_lang'],'_name_part':lambda e:('loc',123),'_place_part':lambda e:'here'}
++  parts=self.production('_entry_parts',ns)(self.entry,0,1)
++  self.assertEqual(parts[0],('loc',123));self.assertEqual(parts[1],', dirty, scanner unavailable, here')
++ def test_group_preview_also_announces_condition(self):
++  self.set(value(15129,15131));self.entry.role=''
++  ns={'lang':sys.modules['tyjokr_a11y_lang'],'_entries':lambda:[self.entry],
++   '_group_key':lambda:'PLUMBING','_label_hash':lambda k:1,'_current':lambda:self.entry,
++   '_sub_label_part':lambda *a:None,'_name_part':lambda e:('loc',123),'_place_part':lambda e:'here'}
++  self.assertEqual(self.production('_group_parts',ns)()[-1],', dirty, here.')
++
++if __name__=='__main__':unittest.main()

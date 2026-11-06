@@ -753,10 +753,11 @@ def _place_part(entry):
 
 
 def _entry_parts(entry, index, total):
+    import tyjokr_a11y_cleanliness as cleanliness
     status = ', ' + lang.t('scanner unavailable') if entry.availability == 'locked' else ''
     if entry.role:
         status = ', ' + entry.role + status
-    return [_name_part(entry), status + ', ' + _place_part(entry),
+    return [_name_part(entry), cleanliness.suffix(entry) + status + ', ' + _place_part(entry),
             '. {} {} {}.'.format(index + 1, lang.t('of'), total)]
 
 
@@ -789,7 +790,8 @@ def _group_parts():
             parts.append(sub)
             parts.append(_sub_count_part(entries, entry))
         parts.append(_name_part(entry))
-        parts.append((', ' + entry.role if entry.role else '') + ', ' + _place_part(entry) + '.')
+        import tyjokr_a11y_cleanliness as cleanliness
+        parts.append(cleanliness.suffix(entry) + (', ' + entry.role if entry.role else '') + ', ' + _place_part(entry) + '.')
     return parts
 
 
