@@ -3,6 +3,10 @@ TS4 ACCESS CONTROLS
 Each line gives a shortcut and its action. Start with Scanner and Menus.
 Build controls are on by default; you can turn them off in settings.
 
+Accessibility menu > Away actions: choose a household Sim away from this
+lot, then use their native portrait menu to choose what they focus on.
+The game supplies the available actions. Escape closes without choosing.
+
 SCANNER
 
 Turn Scanner mode on in settings or press Ctrl+Alt+Space.

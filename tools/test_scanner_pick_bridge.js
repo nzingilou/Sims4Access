@@ -57,4 +57,7 @@ assert.strictEqual(requestId, 1); assert.strictEqual(requests.at(-1)[1].commandA
 manager.A11yOnGameMessage('A11y|pick|0|5|77||10.25|6.5|-4.125|2');
 assert.deepStrictEqual(Array.from(requests.at(-1)[1].commandArgs), ['0',5,10.25,6.5,-4.125,77,2,0,0,0,2,0,0,true]);
 assert.strictEqual(pie.mPickResults.pickType,5);checks++;
+manager.A11yOnGameMessage('A11y|pick|18446744073709551615|11|0|Home Sim|1.5|3|-4|2');
+assert.deepStrictEqual(Array.from(requests.at(-1)[1].commandArgs), ['18446744073709551615',11,1.5,3,-4,0,2,0,0,0,3,0,0,true]);
+assert.strictEqual(pie.mPickResults.pickType,11);checks++;
 console.log(checks + ' scanner pick bridge checks passed (native services mocked).');

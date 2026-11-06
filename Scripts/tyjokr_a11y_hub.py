@@ -120,6 +120,16 @@ def select_sim(sim_id):
     return True
 
 
+def away_actions():
+    import tyjokr_a11y_away as away
+    return away.open_away_actions()
+
+
+@sims4.commands.Command('a11y.away', command_type=sims4.commands.CommandType.Live)
+def a11y_away(_connection=None):
+    return away_actions()
+
+
 def household():
     client = _client()
     if client is None:
@@ -702,7 +712,7 @@ def open_hub():
             (('action queue', action_queue), ('events', events_window), ('businesses', business.businesses_window)) +
             pack_rows +
             (('self interactions', self_interactions), ('Floor actions here', floor_interactions),
-             ('household sims', household), ('household funds', funds),
+             ('household sims', household), ('away actions', away_actions), ('household funds', funds),
              ('day and time', read_clock),
              ('known contacts', contacts.open_contacts)) + build_rows +
             (('waiting call or text', phone.open_waiting),) +

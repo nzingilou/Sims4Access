@@ -1,0 +1,20 @@
+{
+  "git_base": "fae26cfd32f837a442f1d9a2f43275b0c168c6e2",
+  "python": "3.7.9",
+  "base_script_sha256": "d8a5ebc7312a03d4f3edb8e6c3d060205af6ae017a6c5dc3a70918cffaf9e21a",
+  "changed_entries": [
+    "tyjokr_a11y_hub.pyc",
+    "tyjokr_a11y_lang.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_away.pyc"
+  ],
+  "unchanged_entries": 56,
+  "unchanged_hub_functions": 44,
+  "regression_suites": 114,
+  "reported_checks": 1547,
+  "status": "offline validated; in-game away menu verification pending",
+  "files": {
+    "TS4_Access.ts4script": "3832c10b86e39cab9d595223086e2042211821f0f2ee60a8018f36ae9b3006de"
+  }
+}

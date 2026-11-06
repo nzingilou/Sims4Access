@@ -1,0 +1,46 @@
+{
+  "git_base": "fae26cfd32f837a442f1d9a2f43275b0c168c6e2",
+  "patch_sha256": "df1f21f198ddea453038bad6d0635f8e5d43b76e987f230d61fc50dc698391bf",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_away.py",
+      "before_sha256": null,
+      "after_sha256": "584146b894a05191b7442989172e44cdea0dc90370c6f29627080b0142f7092c"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_hub.py",
+      "before_sha256": "c537a2686c129654c520fd91ca03d6a02c9bd20b3be2c057fe75e09ab448002e",
+      "after_sha256": "a909938e6aa5efd88317f8a4295229a41301ead69a33968e6a39b70ce87e78fe"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_lang.py",
+      "before_sha256": "674ca38f47933675373065930954d95899e0ed08d037e91a96edf919483d86b7",
+      "after_sha256": "d2f1921c4be59957379da7a8f387ba89fdfffd5da8838e8cd04bae3027e025fc"
+    },
+    {
+      "path": "tools/test_away_actions.py",
+      "before_sha256": null,
+      "after_sha256": "d57e6ed53662b25f8efbd0f4a0e9b76937cfa8050fecef7655995912e75b059f"
+    },
+    {
+      "path": "tools/test_scanner_pick_bridge.js",
+      "before_sha256": "18d8b2d4e1c63069c5359714194dedc7ee650012ce21e9b2f3bca3efaceb2c75",
+      "after_sha256": "55c9f7a60dfa974ad5d0d78759c4b28e0476a70fd6ff2a08e90ed0b919d15b3c"
+    },
+    {
+      "path": "docs/development/changes/away-actions.md",
+      "before_sha256": null,
+      "after_sha256": "00c718b2fa05cba95636ad1d34c0fca9e0c4f5653a8d2f01995a47f472e55434"
+    },
+    {
+      "path": "CONTROLS.txt",
+      "before_sha256": "45e2794163901461346617609ee1a7a1944fdf9622a001647ecf473a40fec81b",
+      "after_sha256": "4fb7dee2f9e32e603bee98b3eadc4073992caae6109db295bd4cc43e3e8490c0"
+    },
+    {
+      "path": "CHEATS.txt",
+      "before_sha256": "19e64cbf57fef14bea929a8a69119b9132da9b14f96ba6be28761a3aa282ef1d",
+      "after_sha256": "c8f467609e03fb79de7659d8980d36a96288737ec96d8c110a560b242af07505"
+    }
+  ]
+}

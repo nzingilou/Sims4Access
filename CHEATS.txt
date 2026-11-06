@@ -41,6 +41,7 @@ QUICK ACCESS
 a11y.phonelist: Open the phone action list.
 a11y.phone: Open a waiting call or text.
 a11y.household: Choose an active Sim from your household.
+a11y.away: Choose a household Sim away from this lot and open their native portrait actions.
 a11y.contacts: Open known contacts.
 a11y.funds: Read household funds.
 a11y.scan rescan: Refresh the scanner.
