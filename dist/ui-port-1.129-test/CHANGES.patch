@@ -1,214 +1,898 @@
-diff --git a/docs/development/changes/options-settings.md b/docs/development/changes/options-settings.md
+diff --git a/CHEATS.txt b/CHEATS.txt
+index e274f39..c888293 100644
+--- a/CHEATS.txt
++++ b/CHEATS.txt
+@@ -49,3 +49,5 @@ a11y.scan rescan: Refresh the scanner.
+ 
+ Settings commands save your preferences. Updating the mod preserves your
+ settings file; the release ZIP does not replace it.
++
++a11y.buildcoords 5: Read-only native projection and screen-mapping check. In Build Mode, close the console and wait eight seconds. Does not move the pointer or build.
+diff --git a/Scripts/tyjokr_a11y_build_coordinates.py b/Scripts/tyjokr_a11y_build_coordinates.py
 new file mode 100644
-index 0000000..588606a
+index 0000000..3e82d5c
 --- /dev/null
-+++ b/docs/development/changes/options-settings.md
-@@ -0,0 +1,11 @@
-+# Game Options activation
++++ b/Scripts/tyjokr_a11y_build_coordinates.py
+@@ -0,0 +1,315 @@
++"""Measured UI -> client -> physical-screen boundary for build helpers.
 +
-+- `flash/TooltipManager_patched.as`, `A11yOptionsControl` / `A11yActionProxy` (around 6102 / 6777): route Options cell activation to its visible native checkbox, dropdown or text button. Retain native enabled checks, events, dropdown selection and Apply/Revert handling.
-+- `A11yOptionsRowLabel` / `A11yCheckboxState` (around 6125 / 7730): read the localized label, visible value/descriptions and actual checkbox state; omit hidden controls and checkbox placeholder text. Re-read checkbox rows after activation using the existing settled-focus mechanism in `A11yActivate`.
-+- `tools/test_options_simplified.js`: settings type/target, disabled control, label/value, hidden artwork, checkbox state, description and subclass coverage.
++No resolution presets or extra DPI multiplier. Native projection is read-only;
++actual clicks/drags remain the existing helpers and the game's validation.
++"""
++import contextlib
++import ctypes
++import json
++import math
++import os
++import threading
++import time
++from urllib.parse import unquote
++import sims4.commands
++import tyjokr_a11y_speech as speech
++import tyjokr_a11y_display_diagnostic as display
 +
-+Reproduction: Gameplay Auto Age and Pack Settings rows were announced, but Enter clicked the outer CellView rather than the child owning the native event. Dropdown rows also read hidden checkbox artwork as unchecked. Fix leaves row order and keyboard bindings intact.
++_build = None
++_frame = None
++_serial = 0
++_pending = {}
++_lock = threading.Lock()
++_local = threading.local()
 +
-+In-game test: Enter on Auto Age opens its choices; arrows then Enter choose a value. Enter/Space on a checkbox toggles and reads its state. Apply Changes saves normally. Check Gameplay, Pack Settings and a neighbouring Audio/Graphics option; verify scanner Enter after closing Options. In-game results are recorded separately from offline checks.
 +
-+Rollback: restore the paired previous UI packages, or reverse the source patch. No script change.
++def _log(kind, **data):
++    speech.log_line('build coordinates: ' + json.dumps(dict(kind=kind, **data), sort_keys=True, default=str))
++
++
++def _api():
++    u = display._api()
++    signatures = {
++        'SetThreadDpiAwarenessContext': (ctypes.c_void_p, [ctypes.c_void_p]),
++        'SetCursorPos': (ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]),
++        'mouse_event': (None, [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t]),
++        'GetAsyncKeyState': (ctypes.c_short, [ctypes.c_int32]),
++        'GetAncestor': (ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_uint32]),
++        'keybd_event': (None, [ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_size_t]),
++    }
++    for name, (result, args) in signatures.items():
++        fn = getattr(u, name)
++        fn.restype, fn.argtypes = result, args
++    return u
++
++
++@contextlib.contextmanager
++def physical_context(u):
++    previous = u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
++    if not previous: raise RuntimeError('Per-monitor coordinate context unavailable')
++    try: yield
++    finally:
++        if not u.SetThreadDpiAwarenessContext(previous):
++            _log('dpi-restore-failed')
++            raise RuntimeError('Thread DPI context could not be restored')
++
++
++def window(u):
++    hwnd = u.GetForegroundWindow()
++    pid = ctypes.c_uint32()
++    if not hwnd or not u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or pid.value != os.getpid():
++        raise RuntimeError('The game must remain focused')
++    if u.GetAncestor(hwnd,3)!=hwnd:raise RuntimeError('Close the native game dialog before building')
++    if u.IsIconic(hwnd): raise RuntimeError('The game window is minimized')
++    rect = display.RECT(); origin = display.POINT(0, 0)
++    if not u.GetClientRect(hwnd, ctypes.byref(rect)) or not u.ClientToScreen(hwnd, ctypes.byref(origin)):
++        raise RuntimeError('Game window geometry unavailable')
++    w, h = int(rect.right-rect.left), int(rect.bottom-rect.top)
++    desktop = tuple(int(u.GetSystemMetrics(i)) for i in (76,77,78,79))
++    if min(w,h,desktop[2],desktop[3]) < 100: raise RuntimeError('Invalid game window dimensions')
++    return (int(hwnd),origin.x,origin.y,w,h,int(u.GetDpiForWindow(hwnd)),desktop,
++            int(u.GetWindowLongPtrW(hwnd,-16)))
++
++
++def capture_window():
++    u = _api()
++    with physical_context(u): return window(u)
++
++
++class Frame:
++    def __init__(self, zone, width, height, mode, bounds, layout, geometry, align=''):
++        if not all(math.isfinite(v) for v in (width,height,*bounds,*layout)):
++            raise ValueError('Non-finite viewport')
++        if not (100 <= width <= 100000 and 100 <= height <= 100000): raise ValueError('Invalid viewport')
++        if mode not in ('noScale','exactFit','showAll','noBorder'): raise ValueError('Unverified stage scale mode: '+mode)
++        if mode in ('showAll','noBorder') and align not in ('','T','B','L','R','TL','TR','BL','BR','LT','RT','LB','RB'):
++            raise ValueError('Unknown stage alignment: '+repr(align))
++        if min(layout) < 100 or not (0 <= bounds[0] < bounds[2] <= layout[0] and 0 <= bounds[1] < bounds[3] <= layout[1]):
++            raise ValueError('Invalid build bounds')
++        self.zone,self.width,self.height,self.mode,self.geometry=zone,width,height,mode,geometry
++        self.sx,self.sy=geometry[3]/width,geometry[4]/height
++        self.ox=self.oy=0.0
++        if mode in ('showAll','noBorder'):
++            self.sx=self.sy=(min if mode=='showAll' else max)(self.sx,self.sy)
++            free_x,free_y=geometry[3]-width*self.sx,geometry[4]-height*self.sy
++            self.ox=0.0 if 'L' in align else free_x if 'R' in align else free_x/2
++            self.oy=0.0 if 'T' in align else free_y if 'B' in align else free_y/2
++        self.bounds=(bounds[0]*width/layout[0],bounds[1]*height/layout[1],bounds[2]*width/layout[0],bounds[3]*height/layout[1])
++    def client(self, x, y, offset=(0,0)):
++        x,y=float(x)+offset[0],float(y)+offset[1]
++        if not (math.isfinite(x) and math.isfinite(y) and 0 <= x < self.width and 0 <= y < self.height):
++            raise ValueError('Projected point is outside the game viewport')
++        result=(int(round(self.ox+x*self.sx)),int(round(self.oy+y*self.sy)))
++        if not (0<=result[0]<self.geometry[3] and 0<=result[1]<self.geometry[4]):raise ValueError('Projected point is cropped from the viewport')
++        return result
++    def clear(self,p):
++        x,y=p;left,top,right,bottom=self.bounds
++        return left <= x <= right and top <= y <= bottom and .02*self.width <= x <= .98*self.width and .08*self.height <= y <= .70*self.height
++
++
++@sims4.commands.Command('a11y.coords_enc', command_type=sims4.commands.CommandType.Live)
++def receive(text: str = '', _connection=None):
++    try:
++        if len(text)>3000:return False
++        fields=unquote(text).split('|')
++        if len(fields)!=15:return False
++        ident=int(fields[0]);zone=int(fields[1]);status=fields[2]
++        with _lock:job=_pending.get(ident)
++        if job is None or job['zone']!=zone:return False
++        if status not in ('point','viewport'):
++            job['result']={'status':status};job['event'].set();return True
++        values=[float(fields[i]) for i in (3,4,5,6,9,10,11,12,13,14)]
++        if not all(math.isfinite(v) for v in values[2:]):return False
++        if status=='point' and not all(math.isfinite(v) for v in values[:2]):return False
++        job['result']={'status':status,'zone':zone,'point':tuple(values[:2]),'width':values[2],'height':values[3],
++                       'mode':fields[7],'align':fields[8],'layout':tuple(values[4:6]),'bounds':tuple(values[6:10])}
++        job['event'].set();return True
++    except Exception as exc:
++        _log('reply-rejected',error=type(exc).__name__);return False
++
++
++def _measure(x,z,level,height=0.0,timeout=3.0):
++    global _serial,_frame
++    before=capture_window()
++    with _lock:
++        _serial=(_serial%2147483646)+1;ident=_serial
++        job={'event':threading.Event(),'zone':None,'result':None}
++        _pending[ident]=job
++    def start():
++        try:
++            import services
++            job['zone']=int(services.current_zone_id())
++            y=_build.floor_height(x,z,level)+height
++            _build._send_ui('A11y|coords|{}|{:.6f}|{:.6f}|{:.6f}|{}|{}'.format(ident,x,y,z,level,job['zone']))
++        except Exception as exc:
++            job['result']={'status':'request-error','error':type(exc).__name__};job['event'].set()
++    _build.core.post(start)
++    try:
++        if not job['event'].wait(timeout):raise RuntimeError('Projection measurement timed out; check paired UI packages')
++        result=job['result']
++        if not result or result['status'] not in ('point','viewport'):raise RuntimeError('Projection refused: '+str(result))
++        after=capture_window()
++        if before!=after:raise RuntimeError('Game window changed during projection')
++        _log('raw-measure',response=result,window=after)
++        frame=Frame(result['zone'],result['width'],result['height'],result['mode'],result['bounds'],result['layout'],after,result['align'])
++        _frame=frame
++        _log('measure',response=result,window=after)
++        return result,frame
++    finally:
++        with _lock:_pending.pop(ident,None)
++
++
++def project(x,z,level,timeout=2.5,height=0.0):
++    try:
++        result,frame=_measure(x,z,level,height,timeout=max(2.5,timeout))
++        return result['point'] if result['status']=='point' else None
++    except Exception as exc:
++        _log('project-refused',error=str(exc));return None
++
++
++def _current(u):
++    frame=getattr(_local,'input_frame',None) or _frame
++    if frame is None:raise RuntimeError('Measure the game viewport before building')
++    if window(u)!=frame.geometry:raise RuntimeError('Game focus, size, position or DPI changed; retry the operation')
++    import sys
++    keys=sys.modules.get('tyjokr_a11y_keys')
++    if keys is not None and (getattr(keys,'_editing_active',False) or keys.blocking_active()):
++        raise RuntimeError('Close the open game dialog before building')
++    return frame
++
++
++def stage_size():
++    u=_api()
++    with physical_context(u):f=_current(u);return f.width,f.height
++
++
++def to_screen(x,y):
++    u=_api()
++    with physical_context(u):
++        f=_current(u);cx,cy=f.client(x,y,_build.OFFSET)
++        point=display.POINT(cx,cy)
++        if not u.ClientToScreen(f.geometry[0],ctypes.byref(point)):raise RuntimeError('Client conversion failed')
++        _log('convert',ui=[x,y],client=[cx,cy],screen=[point.x,point.y],window=f.geometry)
++        return point.x,point.y
++
++
++def _release(u):
++    if getattr(_local,'down',False):
++        u.mouse_event(4,0,0,0,0);_local.down=False
++
++
++def move_to(x,y):
++    u=_api()
++    try:
++        with physical_context(u):
++            f=_current(u);g=f.geometry;x,y=int(round(x)),int(round(y))
++            if not _build.on_main(_safe_game,f.zone):raise RuntimeError('Build Mode changed during pointer operation')
++            _current(u)
++            if not (g[1]<=x<g[1]+g[3] and g[2]<=y<g[2]+g[4]):raise RuntimeError('Mouse point is outside the game window')
++            left,top,w,h=g[6]
++            nx=int(round((x-left)*65535/max(1,w-1)));ny=int(round((y-top)*65535/max(1,h-1)))
++            if not (0<=nx<=65535 and 0<=ny<=65535):raise RuntimeError('Mouse point outside virtual desktop')
++            if not u.SetCursorPos(x,y):raise RuntimeError('Pointer positioning failed')
++            u.mouse_event(0xc001,nx,ny,0,0)
++            p=display.POINT()
++            if not u.GetPhysicalCursorPos(ctypes.byref(p)) or abs(p.x-x)>2 or abs(p.y-y)>2:
++                raise RuntimeError('Physical pointer did not reach the requested point')
++            _local.last=(x,y)
++    except Exception:
++        _release(u);raise
++
++
++def _safe_game(zone):
++    import services
++    import tyjokr_a11y_place as place
++    import tyjokr_a11y_keys as keys
++    return place.in_build_mode() and int(services.current_zone_id())==zone and not keys.blocking_active() and not keys._editing_active
++
++
++def mouse(flags,data=0):
++    u=_api()
++    if flags==_build.LEFT_UP:
++        u.mouse_event(flags,0,0,data,0);_local.down=False;return
++    if flags!=_build.LEFT_DOWN:
++        return _original_mouse(flags,data)
++    try:
++        with physical_context(u):
++            f=_current(u)
++            if not _build.on_main(_safe_game,f.zone):raise RuntimeError('Build context changed before click')
++            p=display.POINT();last=getattr(_local,'last',None)
++            if last is None or not u.GetPhysicalCursorPos(ctypes.byref(p)) or max(abs(p.x-last[0]),abs(p.y-last[1]))>2:
++                raise RuntimeError('Pointer moved before click')
++            _current(u)
++            u.mouse_event(flags,0,0,data,0);_local.down=True
++    except Exception:
++        _release(u);raise
++
++
++def clear_of_panels(point):
++    try:
++        u=_api()
++        with physical_context(u):return _current(u).clear(point)
++    except Exception:return False
++
++
++def _guarded_action(original,args,shift):
++    u=_api()
++    with physical_context(u):
++        f=_current(u)
++        if shift and u.GetAsyncKeyState(0x10)&0x8000:raise RuntimeError('Release Shift before using this helper')
++        _local.input_frame=f
++        try:return original(*args,shift=shift)
++        finally:
++            _release(u)
++            if shift:u.keybd_event(0x10,0x2a,2,0)
++            _local.input_frame=None
++
++
++def park_mouse():
++    try:
++        u=_api()
++        with physical_context(u):
++            g=window(u)
++            u.SetCursorPos(g[1]+g[3]//2,g[2]+g[4]//3)
++    except Exception:pass
++
++
++def install():
++    global _build,_original_mouse
++    import tyjokr_a11y_plus_build as build
++    if getattr(build,'_measured_coordinates_installed',False):return
++    _build=build;_original_mouse=build._mouse
++    original_click,original_drag=build.click,build.drag
++    def click(a,shift=False):return _guarded_action(original_click,(a,),shift)
++    def drag(a,b,shift=False):return _guarded_action(original_drag,(a,b),shift)
++    build.project=project;build._stage_size=stage_size;build._to_screen=to_screen
++    build.move_to=move_to;build._mouse=mouse;build.click=click;build.drag=drag
++    build._clear_of_panels=clear_of_panels;build.park_mouse=park_mouse
++    build._measured_coordinates_installed=True
++    _log('installed')
++
++
++@sims4.commands.Command('a11y.buildcoords', command_type=sims4.commands.CommandType.Live)
++def preflight(delay: float=5,_connection=None):
++    if not math.isfinite(delay):return False
++    install()
++    def work():
++        def target():
++            import services
++            sim=services.get_active_sim()
++            if sim is None:raise RuntimeError('Load a household first')
++            return float(sim.position.x),float(sim.position.z),int(sim.level)
++        try:
++            point=_build.on_main(target)
++            if point is None:raise RuntimeError('Game target unavailable')
++            result,frame=_measure(*point)
++            # Mapping only: never call move_to, mouse, click, drag or park.
++            mapped=to_screen(*result['point']) if result['status']=='point' and frame.clear(result['point']) else None
++            _log('preflight',response=result,physical_point=mapped,window=frame.geometry)
++            text='Build coordinate check complete. No pointer movement or construction. See TS4 Access log.'
++        except Exception as exc:
++            _log('preflight-failed',error=str(exc));text='Build coordinate check failed: '+str(exc)
++        _build.core.post(lambda:speech.speak(text,explicit=True))
++    timer=threading.Timer(max(0,min(30,delay)),work);timer.daemon=True;timer.name='a11y_build_coordinate_check';timer.start()
++    sims4.commands.CheatOutput(_connection)('Read-only projection check scheduled. Close the console and keep Build Mode focused.')
++    return True
+diff --git a/contrib-reference/modules/tyjokr_a11y_contrib.py b/contrib-reference/modules/tyjokr_a11y_contrib.py
+index be41ec4..b3190b7 100644
+--- a/contrib-reference/modules/tyjokr_a11y_contrib.py
++++ b/contrib-reference/modules/tyjokr_a11y_contrib.py
+@@ -459,6 +459,11 @@ def install():
+         import tyjokr_a11y_detached
+     except Exception as ex:
+         _log("detached structure planner did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_build_coordinates
++        tyjokr_a11y_build_coordinates.install()
++    except Exception as ex:
++        _log("measured build coordinates did not load: {!r}".format(ex))
+     _log("narrow contribution layer installed")
+ 
+ 
+diff --git a/docs/development/changes/graphics-option-labels.md b/docs/development/changes/graphics-option-labels.md
+new file mode 100644
+index 0000000..48f9ce1
+--- /dev/null
++++ b/docs/development/changes/graphics-option-labels.md
+@@ -0,0 +1,7 @@
++# Graphics option labels
++
++`flash/TooltipManager_patched.as`: `A11yGraphicsRowLabel` pairs the twelve native `dd*` dropdowns with their localized `lb*` labels on GraphicsTab, DefaultGraphicsTab and MacGraphicsTab. `A11yOptionsRowLabel` calls it before existing row handling. `A11yCheckboxState` also recognizes the exact native `widgets.OptionsMenu::LeftLabelCheckBox` class and reads its Selected value. Values, popup choices, navigation and setting activation are preserved.
++
++Evidence: live log 2026-11-09 21:47-21:48 read unnamed Low/High/Custom values. Current native GraphicsTab.ConfigUI sets the matching localized labels; Graphics uses standalone controls rather than OptionsCellView rows.
++
++`tools/test_options_simplified.js`: Windows/Mac labels, nested value focus, disabled controls, hidden/missing labels, popup choices, checkboxes and unrelated tabs. 19 checks pass offline. Live verification pending.
+diff --git a/docs/development/changes/measured-build-coordinates.md b/docs/development/changes/measured-build-coordinates.md
+new file mode 100644
+index 0000000..a3f9870
+--- /dev/null
++++ b/docs/development/changes/measured-build-coordinates.md
+@@ -0,0 +1,15 @@
++# Measured build coordinates
++
++- `Scripts/tyjokr_a11y_build_coordinates.py`: separate coordinate/input boundary. Native probe supplies stage dimensions, scale mode/alignment, layout bounds and world projection; maps UI -> client -> screen once in a scoped per-monitor worker DPI context. Uses live client origin/size and virtual-desktop bounds, not Options.ini or a fixed resolution. Context is restored on all paths.
++- Existing click/drag helpers are retained. Wrapped input checks focus, geometry/DPI/style, native Build Mode/dialog state and physical pointer arrival before mouse-down; aborts release only helper-owned mouse state. Shift cleanup is protected on errors. Mode/focus/resize changes interrupt a drag. Parking remains inside the current game client and never affects an unfocused window.
++- `contrib-reference/modules/tyjokr_a11y_contrib.py`: installs the adapter after the other contribution modules.
++- `flash/TooltipManager_patched.as`: independent `A11yCoordinate*` marker, frame callback/cleanup and one `coords` encoded route. Reports `a11y.coords_enc`; never enables/moves a virtual cursor or confirms placement. Existing Build cursor paths are unchanged.
++- `tools/test_build_coordinates.py` / `test_coordinate_probe.js`: resolution/DPI/origin/style matrix, standard stage fit modes, input fences/cleanup, stale replies, no-action preflight and native marker lifecycle. CHEATS.txt: `a11y.buildcoords [delay]`.
++
++Evidence: live Windows capture was 2880x1800 at 200%, while the installed builder divided it to 1440x900. Cursor positions and explicit Windows physical conversion agreed. The successful 22:48 live probe confirmed native stage/layout/client dimensions of 2880x1800, noScale, alignment LT, and projection (1389.65,1231.64) mapping directly to physical (1390,1232). The installed planner lacked the checkout's earlier coordinate overrides; this adapter is explicitly wired into the deployed contribution loader.
++
++Stage fit semantics follow the [AIR/AS3 Stage scale-mode contract](https://airsdk.dev/docs/development/display/display-programming/working-with-display-objects/setting-stage-properties). UI scale is already represented by the native display transform; no extra UI/DPI percentage is applied. Unknown modes and cropped/out-of-window points are refused. Alignment is used only for uniform showAll/noBorder fitting; these modes accept either axis order and reject unknown alignment. Raw native replies are logged before validation.
++
++Live sequence: in Build Mode enable logging, run `a11y.buildcoords 5`, close the console, wait up to eight seconds. Inspect `build coordinates: preflight` and `measure` before testing a helper against a backed-up save. Compare planned and game-created room footprints. Read-only projection alone does not prove actual drawing succeeded.
++
++Rollback: restore the previous paired script/UI packages or reverse the source patch and remove the coordinate module/loader hook.
 diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
-index 32a0cd5..2bc9cbf 100644
+index 2bc9cbf..644b81d 100644
 --- a/flash/TooltipManager_patched.as
 +++ b/flash/TooltipManager_patched.as
-@@ -6096,6 +6096,28 @@ package olympus.core
-       // focused dropdown button says only its value (2026-09-26 live: the
-       // Autonomy and Auto Age rows read as bare Off and Yes). Checkbox rows
-       // are whole-cell stops that already read their label.
-+      // Native option cells own labels, but only their visible child owns
-+      // activation. Keep disabled controls as targets so EA's enabled guard
-+      // remains authoritative. No direct setting writes or synthetic toggles.
-+      public function A11yOptionsControl(item:DisplayObject) : DisplayObject
+@@ -302,6 +302,97 @@ package olympus.core
+          catch(e:Error) { this.A11yBuildUnbind(); this.A11yBuildReply(serial,"aimfailed"); }
+       }
+ 
++      // Independent read-only projection. Never enables/moves a cursor or
++      // confirms a tool; the Python coordinate adapter owns the response.
++      protected var mA11yCoordinateMarker:Sprite = null;
++      protected var mA11yCoordinateSerial:int = 0;
++      protected var mA11yCoordinateZone:String = "";
++      protected var mA11yCoordinateUntil:int = 0;
++      protected var mA11yCoordinateFrames:int = 0;
++
++      public function A11yCoordinateCancel() : void
 +      {
-+         var name:String = item != null ? getQualifiedClassName(item) : "";
-+         var control:DisplayObject = null;
-+         var fields:Array = ["cbCheckbox","ddDropdown","tbTextButton"];
-+         var index:int = 0;
-+         if(name.indexOf("widgets.OptionsMenu.controls::") != 0 || name.indexOf("OptionsCellView") < 0) { return null; }
-+         while(index < fields.length)
++         var marker:Sprite = this.mA11yCoordinateMarker;
++         this.mA11yCoordinateMarker = null;
++         try
 +         {
-+            if(fields[index] in item)
++            if(marker != null)
 +            {
-+               control = Object(item)[fields[index]] as DisplayObject;
-+               if(this.A11yIsLive(control)) { return control; }
++               marker.removeEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame);
++               CommunicationManager.CallGameService("UnbindDisplayObject",{"displayObject":marker});
 +            }
-+            index = index + 1;
 +         }
-+         return null;
++         catch(e:Error) { }
++         try { if(marker != null && marker.parent != null) { marker.parent.removeChild(marker); } }
++         catch(removeError:Error) { }
++      }
++
++      public function A11yCoordinateReply(result:String, point:Point = null) : void
++      {
++         var serial:int = this.mA11yCoordinateSerial;
++         var zone:String = this.mA11yCoordinateZone;
++         try
++         {
++            var stage:Stage = this.mTooltipsLayer.stage;
++            var layout:Object = getDefinitionByName("olympus.gamepad.LayoutAPI");
++            var bounds:Rectangle = this.A11yBuildBounds();
++            this.A11yPostToPython("a11y.coords_enc",encodeURIComponent([
++               serial,zone,result,point != null ? point.x : "NaN",point != null ? point.y : "NaN",
++               stage.stageWidth,stage.stageHeight,stage.scaleMode,stage.align,
++               Number(layout["StageWidth"]),Number(layout["StageHeight"]),
++               bounds != null ? bounds.left : 0,bounds != null ? bounds.top : 0,
++               bounds != null ? bounds.right : 0,bounds != null ? bounds.bottom : 0].join("|")));
++         }
++         catch(e:Error) { }
++         this.A11yCoordinateCancel();
++      }
++
++      public function A11yCoordinateProbe(parts:Array) : void
++      {
++         if(parts.length != 8) { return; }
++         if(this.mA11yCoordinateMarker != null) { this.A11yCoordinateReply("cancelled"); }
++         this.mA11yCoordinateSerial = int(parts[2]);
++         this.mA11yCoordinateZone = String(parts[7]);
++         try
++         {
++            var x:Number = Number(parts[3]);
++            var y:Number = Number(parts[4]);
++            var z:Number = Number(parts[5]);
++            var level:Number = Number(parts[6]);
++            if(this.mA11yCoordinateSerial <= 0 || !isFinite(x) || !isFinite(y) || !isFinite(z) || !isFinite(level) || int(level) != level || Math.abs(x) > 100000 || Math.abs(y) > 100000 || Math.abs(z) > 100000) { return; }
++            if(!this.mA11yBuildControls || !this.mA11yKeyboard || this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || getTimer() > this.mA11yKeyboardLease) { this.A11yCoordinateReply("blocked"); return; }
++            if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("zonechanged"); return; }
++            var marker:Sprite = new Sprite();
++            marker.name = "A11yCoordinateProbe";
++            marker.mouseEnabled = false;
++            marker.mouseChildren = false;
++            marker.alpha = 0;
++            marker.x = -1000000;
++            marker.y = -1000000;
++            this.mA11yCoordinateMarker = marker;
++            this.mA11yCoordinateUntil = getTimer() + 1500;
++            this.mA11yCoordinateFrames = 0;
++            this.mTooltipsLayer.addChild(marker);
++            marker.addEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame,false,0,true);
++            CommunicationManager.CallGameService("BindDisplayObject",{"displayObject":marker,"worldOffset":{"x":x,"y":y,"z":z},"screenOffset":{"x":0,"y":0}});
++         }
++         catch(e:Error) { this.A11yCoordinateReply("error"); }
++      }
++
++      public function A11yCoordinateFrame(event:Event) : void
++      {
++         try
++         {
++            if(this.mA11yCoordinateMarker == null) { return; }
++            this.mA11yCoordinateFrames = this.mA11yCoordinateFrames + 1;
++            if(this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || !this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("blocked"); return; }
++            var point:Point = this.mA11yCoordinateMarker.localToGlobal(new Point(0,0));
++            if(this.mA11yCoordinateMarker.visible && isFinite(point.x) && isFinite(point.y) && Math.abs(point.x) < 999999 && Math.abs(point.y) < 999999) { this.A11yCoordinateReply("point",point); return; }
++            if(getTimer() > this.mA11yCoordinateUntil || this.mA11yCoordinateFrames >= 90) { this.A11yCoordinateReply("viewport"); }
++         }
++         catch(e:Error) { this.A11yCoordinateReply("error"); }
++      }
++
+       public function A11yBuildProjectionFrame() : void
+       {
+          var point:Point = null;
+@@ -4007,6 +4098,7 @@ package olympus.core
+          }
+          if(_loc2_[1] == "buildhand" && _loc2_.length == 4 && _loc2_[2] == "drop") { this.A11yBuildHandDrop(String(_loc2_[3])); return; }
+          if(_loc2_[1] == "buildaim" && _loc2_.length == 8) { this.A11yBuildAim(_loc2_); return; }
++         if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }
+          if(_loc2_[1] == "build" && _loc2_.length == 4) { this.A11yBuildCommand(String(_loc2_[2]),int(_loc2_[3])); return; }
+          if(_loc2_[1] == "plus" && _loc2_.length >= 3) { this.A11yPlusHandle(_loc2_); return; }
+          if(_loc2_[1] == "keyup") { delete this.mA11yGuardHeld[int(_loc2_[2])]; return; }
+@@ -6118,8 +6210,49 @@ package olympus.core
+          return null;
+       }
+ 
++      public function A11yGraphicsRowLabel(item:DisplayObject, result:Array) : void
++      {
++         var node:DisplayObject = item;
++         var depth:int = 0;
++         var name:String = "";
++         var suffix:String = "";
++         var control:DisplayObject = null;
++         var label:DisplayObject = null;
++         var text:String = "";
++         var fields:Array = ["DisplayType","Resolution","RefreshRate","SceneRes","SimQuality","ObjQuality","LightingQuality","ReflectionQuality","EdgeSmooth","VisualEffect","ViewDistance","VisualQuality"];
++         try
++         {
++            while(node != null && depth < 8)
++            {
++               name = getQualifiedClassName(node);
++               if(name == "widgets.OptionsMenu.controls.tabs::DefaultGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::MacGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::GraphicsTab")
++               {
++                  for each(suffix in fields)
++                  {
++                     if(("dd" + suffix) in node && ("lb" + suffix) in node)
++                     {
++                        control = Object(node)["dd" + suffix] as DisplayObject;
++                        label = Object(node)["lb" + suffix] as DisplayObject;
++                        if(this.A11yIsLive(control) && this.A11yIsLive(label) && this.A11yIsInside(item,control))
++                        {
++                           text = this.A11yJoinedText(label);
++                           if(text != null && text.length > 0) { result.unshift("-999998|0|" + text); }
++                           return;
++                        }
++                     }
++                  }
++                  return;
++               }
++               node = node.parent;
++               depth = depth + 1;
++            }
++         }
++         catch(e:Error) { }
 +      }
 +
        public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
        {
++         this.A11yGraphicsRowLabel(item,result);
           var node:DisplayObject = item;
-@@ -6109,6 +6131,18 @@ package olympus.core
+          var depth:int = 0;
+          var label:Object = null;
+@@ -7737,7 +7870,7 @@ package olympus.core
              {
-                if("lbLabel" in node && "ddDropdown" in node)
-                {
-+                  if(node == item && getQualifiedClassName(node).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(node).indexOf("OptionsCellView") >= 0)
-+                  {
-+                     // Focused rows used to read hidden checkbox/button artwork
-+                     // ("Ok", "Label Name") alongside the actual setting.
-+                     result.length = 0;
-+                     var control:DisplayObject = this.A11yOptionsControl(node);
-+                     this.A11yCollectText(Object(node)["lbLabel"] as DisplayObject,result,1,true);
-+                     if(control != null && getQualifiedClassName(control).indexOf("Checkbox") < 0) { this.A11yCollectText(control,result,1,true); }
-+                     if("txtDescription" in node) { this.A11yCollectText(Object(node)["txtDescription"] as DisplayObject,result,1,true); }
-+                     if("txtInformation" in node) { this.A11yCollectText(Object(node)["txtInformation"] as DisplayObject,result,1,true); }
-+                     return;
-+                  }
-                   if(!this.A11yIsInside(item,Object(node)["ddDropdown"] as DisplayObject)) { return; }
-                   label = Object(node)["lbLabel"];
-                   if(label == null || !label["visible"] || !("textField" in label)) { return; }
-@@ -6733,6 +6767,11 @@ package olympus.core
-       public function A11yActionProxy(item:DisplayObject) : DisplayObject
-       {
-          if(item == null) { return null; }
-+         if(getQualifiedClassName(item).indexOf("widgets.OptionsMenu.controls::") == 0)
-+         {
-+            var option:DisplayObject = this.A11yOptionsControl(item);
-+            if(option != null) { return option; }
-+         }
-          if(this.mA11ySimplifiedMenus && this.A11ySaveChoice(item)) { return Object(item)["btnPlay"] as DisplayObject; }
-          if(item.parent != null && "mcFilterBubble" in item.parent && Object(item.parent)["mcFilterBubble"] == item) { return Object(item.parent)["btnFilterPanel"] as DisplayObject; }
-          if("btnSolve" in item) { return Object(item)["btnSolve"] as DisplayObject; }
-@@ -7571,6 +7610,7 @@ package olympus.core
-                // fail silently; the narrator translates this token. Ordinary
-                // disabled controls still read EA's own reason.
-                if(!this.A11yClickControl(this.A11yActionProxy(_loc2_))) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
-+               else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0) { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
-                return;
+                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
              }
-             if(this.A11yInformational(_loc2_) && !this.A11yIsFocusable(_loc2_)) { this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return; }
-@@ -7683,6 +7723,11 @@ package olympus.core
-          var _loc5_:* = undefined;
-          try
-          {
-+            if(param1 != null && getQualifiedClassName(param1).indexOf("widgets.OptionsMenu.controls::") == 0 && getQualifiedClassName(param1).indexOf("OptionsCellView") >= 0)
-+            {
-+               var option:DisplayObject = this.A11yOptionsControl(param1);
-+               return option != null && getQualifiedClassName(option).indexOf("Checkbox") >= 0 ? this.A11yCheckboxState(option) : "";
-+            }
-             if(this.A11ySingleFilterLabel(param1) == param1 && param1 != null)
+-            if(_loc2_.indexOf("Checkbox") >= 0)
++            if(_loc2_.indexOf("Checkbox") >= 0 || _loc2_ == "widgets.OptionsMenu::LeftLabelCheckBox")
              {
-                return this.A11yCheckboxState(Object(param1.parent)["btnCheckBox"]);
+                _loc5_ = param1;
+                if(_loc5_.Selected == true)
+diff --git a/tools/test_build_coordinates.py b/tools/test_build_coordinates.py
+new file mode 100644
+index 0000000..c6314d5
+--- /dev/null
++++ b/tools/test_build_coordinates.py
+@@ -0,0 +1,166 @@
++"""Resolution-independent projection mapping and fail-closed native input."""
++import importlib.util,os,pathlib,sys,threading,types,unittest
++from unittest.mock import Mock,patch
++ROOT=pathlib.Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'Scripts'))
++commands=types.SimpleNamespace(Command=lambda *a,**k:lambda f:f,CommandType=types.SimpleNamespace(Live=1),CheatOutput=lambda c:lambda s:None)
++sys.modules.update(sims4=types.SimpleNamespace(commands=commands),tyjokr_a11y_speech=types.SimpleNamespace(log_enabled=False,log_line=Mock()))
++sys.modules['sims4.commands']=commands
++import tyjokr_a11y_build_coordinates as c
++G=(2**40,120,80,2880,1800,192,(-1920,0,4800,1800),0x94080000)
++def frame(w=2880,h=1800,geometry=G,mode='noScale'):
++ return c.Frame(42,w,h,mode,(8,80,w-8,h-120),(w,h),geometry)
++class API:
++ def __init__(self):self.events=[];self.pos=(0,0);self.dpi=1;self.restore=[];self.geometry=G;self.owner=os.getpid();self.fail_position=False
++ def SetThreadDpiAwarenessContext(self,ctx):
++  before=self.dpi;self.dpi=ctx.value if hasattr(ctx,'value') else ctx;self.restore.append(self.dpi);return before
++ def GetForegroundWindow(self):return self.geometry[0]
++ def GetWindowThreadProcessId(self,h,p):p._obj.value=self.owner;return 1
++ def GetAncestor(self,h,kind):return h
++ def IsIconic(self,h):return False
++ def GetClientRect(self,h,p):p._obj.left=p._obj.top=0;p._obj.right=self.geometry[3];p._obj.bottom=self.geometry[4];return 1
++ def ClientToScreen(self,h,p):p._obj.x+=self.geometry[1];p._obj.y+=self.geometry[2];return 1
++ def GetDpiForWindow(self,h):return self.geometry[5]
++ def GetSystemMetrics(self,i):return dict(zip((76,77,78,79),self.geometry[6]))[i]
++ def GetWindowLongPtrW(self,h,i):return self.geometry[7]
++ def SetCursorPos(self,x,y):self.events.append(('move',x,y));self.pos=(x,y);return not self.fail_position
++ def GetPhysicalCursorPos(self,p):p._obj.x,p._obj.y=self.pos;return 1
++ def mouse_event(self,*args):self.events.append(('mouse',)+args)
++ def GetAsyncKeyState(self,key):return 0
++ def keybd_event(self,*args):self.events.append(('key',)+args)
++class Tests(unittest.TestCase):
++ def setUp(self):
++  c._frame=frame();c._pending.clear();c._local=threading.local();self.u=API()
++  c._build=types.SimpleNamespace(OFFSET=[0,0],LEFT_DOWN=2,LEFT_UP=4,on_main=lambda fn,*a:True)
++  self.patch=patch.object(c,'_api',return_value=self.u);self.patch.start();self.addCleanup(self.patch.stop)
++  c._original_mouse=Mock()
++ def test_resolution_dpi_mode_matrix_has_no_extra_dpi_multiplier(self):
++  for w,h in [(800,600),(1024,768),(1280,720),(1366,768),(1600,900),(1920,1080),(1920,1200),(2560,1440),(2880,1800),(3840,2160),(5120,2880)]:
++   for dpi in (96,120,144,168,192,240,288):
++    for left,top in ((0,0),(120,80),(-1920,0),(0,-1080)):
++     for style in (0x94080000,0x16cf0000):
++      g=(1,left,top,w,h,dpi,(-6000,-3000,16000,10000),style)
++      f=frame(w,h,g)
++      self.assertEqual(f.client(w*.5,h*.5),(w//2,h//2))
++ def test_exact_fit_backbuffer_mapping(self):
++  f=frame(1920,1200,G,'exactFit');self.assertEqual(f.client(960,600),(1440,900))
++ def test_200_percent_reported_game_coordinates_are_not_doubled(self):
++  self.assertEqual(c.to_screen(1440,900),(1560,980));self.assertEqual(self.u.dpi,1)
++ def test_window_origin_and_negative_monitor_are_applied(self):
++  g=(1,-1920,20,1920,1080,144,(-1920,0,3840,1200),0x94080000)
++  self.u.geometry=g;c._frame=frame(1920,1080,g)
++  self.assertEqual(c.to_screen(960,540),(-960,560))
++ def test_context_restored_after_exception(self):
++  with self.assertRaises(ValueError):
++   with c.physical_context(self.u):raise ValueError('failure')
++  self.assertEqual(self.u.dpi,1)
++ def test_missing_dpi_context_stops_before_input(self):
++  self.u.SetThreadDpiAwarenessContext=lambda ctx:0
++  with self.assertRaises(RuntimeError):c.move_to(100,100)
++  self.assertFalse(self.u.events)
++ def test_foreign_foreground_stops_before_input(self):
++  self.u.owner=0
++  with self.assertRaises(RuntimeError):c.move_to(500,500)
++  self.assertFalse(self.u.events)
++ def test_resize_move_dpi_and_mode_change_are_refused(self):
++  for index,value in ((1,121),(3,1920),(5,144),(7,0x16cf0000)):
++   changed=list(G);changed[index]=value;self.u.geometry=tuple(changed)
++   with self.assertRaises(RuntimeError):c.to_screen(100,100)
++ def test_owned_native_dialog_is_not_treated_as_game_canvas(self):
++  self.u.GetAncestor=lambda h,kind:h+1
++  with self.assertRaises(RuntimeError):c.move_to(500,500)
++  self.assertFalse(self.u.events)
++ def test_unknown_stage_policy_and_invalid_bounds_are_refused(self):
++  with self.assertRaises(ValueError):frame(mode='unknown')
++  with self.assertRaises(ValueError):c.Frame(1,1920,1080,'noScale',(0,0,0,0),(1920,1080),G)
++ def test_unknown_or_outside_points_refused(self):
++  for p in ((-1,1),(2880,1),(1,float('nan'))):
++   with self.assertRaises(ValueError):c.to_screen(*p)
++  c._frame=None
++  with self.assertRaises(RuntimeError):c.to_screen(10,10)
++ def test_letterbox_alignment_uses_uniform_scale_and_offsets(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  f=c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g)
++  self.assertEqual(f.client(960,540),(960,600));self.assertEqual(f.client(0,0),(0,60))
++  f=c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g,'TL')
++  self.assertEqual(f.client(0,0),(0,0))
++ def test_no_border_crop_and_unknown_align_are_refused(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  f=c.Frame(1,1920,1080,'noBorder',(8,80,1912,960),(1920,1080),g)
++  self.assertEqual(f.client(960,540),(960,600))
++  with self.assertRaises(ValueError):f.client(0,0)
++  with self.assertRaises(ValueError):c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g,'?')
++ def test_alignment_order_variants_map_identically(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  for mode in ('showAll','noBorder'):
++   for a,b in [('TL','LT'),('TR','RT'),('BL','LB'),('BR','RB')]:
++    first=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,a)
++    second=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,b)
++    self.assertEqual(first.client(960,540),second.client(960,540))
++ def test_nonuniform_mapping_does_not_depend_on_alignment(self):
++  for mode in ('noScale','exactFit'):
++   f=c.Frame(1,1440,900,mode,(8,80,1432,780),(1440,900),G,'unrecognized')
++   self.assertEqual(f.client(720,450),(1440,900))
++ def test_unsafe_panel_points_not_clear(self):
++  self.assertFalse(c.clear_of_panels((100,20)));self.assertFalse(c.clear_of_panels((100,1700)))
++  self.assertTrue(c.clear_of_panels((1440,800)))
++ def test_movement_uses_virtual_desktop_and_verifies_physical_cursor(self):
++  c.move_to(1560,980)
++  expected=(int(round((1560+1920)*65535/4799)),int(round(980*65535/1799)))
++  self.assertIn(('mouse',0xc001,*expected,0,0),self.u.events)
++  self.assertEqual(self.u.dpi,1)
++ def test_no_mouse_down_without_verified_pointer(self):
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_pointer_movement_before_click_is_refused(self):
++  c.move_to(500,500);self.u.pos=(510,500)
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_native_context_change_refuses_mouse_down(self):
++  c.move_to(500,500);c._build.on_main=lambda *a:False
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_abort_after_own_mouse_down_releases_button(self):
++  c.move_to(500,500);c.mouse(2);self.u.owner=0
++  with self.assertRaises(RuntimeError):c.move_to(510,510)
++  self.assertIn(('mouse',4,0,0,0,0),self.u.events);self.assertFalse(c._local.down)
++ def test_original_click_or_drag_failure_releases_mouse_and_shift(self):
++  def action(a,shift=False):c.move_to(500,500);c.mouse(2);raise ValueError('original')
++  with self.assertRaisesRegex(ValueError,'original'):c._guarded_action(action,((1,1),),True)
++  self.assertIn(('mouse',4,0,0,0,0),self.u.events);self.assertIn(('key',0x10,0x2a,2,0),self.u.events)
++  self.assertEqual(self.u.dpi,1)
++ def test_build_mode_change_during_drag_releases_button_before_another_move(self):
++  c.move_to(500,500);c.mouse(2);count=len(self.u.events);c._build.on_main=lambda *a:False
++  with self.assertRaises(RuntimeError):c.move_to(510,510)
++  self.assertEqual(self.u.events[count:],[('mouse',4,0,0,0,0)])
++ def test_wheel_actions_retain_original_handler(self):
++  c.mouse(0x800,120);c._original_mouse.assert_called_once_with(0x800,120)
++ def test_reply_rejects_stale_zone_and_malformed_data(self):
++  job={'zone':42,'event':threading.Event(),'result':None};c._pending[1]=job
++  self.assertFalse(c.receive('1|43|point|1|2|2880|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertFalse(c.receive('1|42|point|1|2|NaN|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertFalse(job['event'].is_set())
++ def test_valid_reply_preserves_viewport_and_offscreen_state(self):
++  job={'zone':42,'event':threading.Event(),'result':None};c._pending[1]=job
++  self.assertTrue(c.receive('1|42|viewport|NaN|NaN|2880|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertTrue(job['event'].is_set());self.assertEqual(job['result']['status'],'viewport')
++ def test_read_only_preflight_never_calls_input(self):
++  timer=Mock();f=frame();c._build.on_main=lambda f,*a:(1,2,0);c._build.core=types.SimpleNamespace(post=lambda f:None)
++  with patch.object(c,'install'),patch.object(c.threading,'Timer',return_value=timer) as make,patch.object(c,'_measure',return_value=({'status':'point','point':(1440,800)},f)),patch.object(c,'to_screen',return_value=(1560,880)),patch.object(c,'move_to') as move,patch.object(c,'mouse') as click:
++   c.preflight();make.call_args[0][1]();move.assert_not_called();click.assert_not_called()
++ def test_release_does_not_release_a_button_we_did_not_press(self):
++  c._release(self.u);self.assertFalse(self.u.events)
++ def test_project_failure_returns_no_point(self):
++  with patch.object(c,'_measure',side_effect=RuntimeError('unavailable')):self.assertIsNone(c.project(1,2,0))
++ def test_native_probe_roundtrip_does_not_use_legacy_aim_or_input(self):
++  c._build.core=types.SimpleNamespace(post=lambda fn:fn());c._build.floor_height=lambda *a:3
++  requests=[]
++  def send(message):
++   requests.append(message);fields=message.split('|')
++   c.receive('|'.join([fields[2],fields[7],'point','1440','720','2880','1800','noScale','','2880','1800','8','80','2872','1680']))
++  c._build._send_ui=send
++  with patch.dict(sys.modules,services=types.SimpleNamespace(current_zone_id=lambda:42)):
++   self.assertEqual(c.project(10,20,0),(1440,720))
++  self.assertTrue(requests[0].startswith('A11y|coords|'));self.assertFalse(self.u.events);self.assertFalse(c._pending)
++ def test_park_does_not_move_an_unfocused_window(self):
++  self.u.owner=0;c.park_mouse();self.assertFalse(self.u.events)
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_coordinate_probe.js b/tools/test_coordinate_probe.js
+new file mode 100644
+index 0000000..632ac92
+--- /dev/null
++++ b/tools/test_coordinate_probe.js
+@@ -0,0 +1,77 @@
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
++const source=fs.readFileSync(path.join(__dirname,'../flash/TooltipManager_patched.as'),'utf8');
++function method(name,runtime){
++ const signature=new RegExp('public function '+name+'\\(([^)]*)\\)\\s*:\\s*\\w+\\s*\\{').exec(source);assert(signature,name);
++ let start=signature.index+signature[0].length,end=start,depth=1;
++ while(depth){if(source[end]==='{')depth++;if(source[end]==='}')depth--;end++;}
++ const strip=s=>s.replace(/:\s*(?:Sprite|Stage|Point|Rectangle|Array|String|Object|Number|Boolean|Error|Event|int)\b/g,'');
++ return vm.runInNewContext('(function('+strip(signature[1]) +'){'+strip(source.slice(start,end-1))+'})',runtime);
++}
++let now=0;
++class Point{constructor(x,y){this.x=x;this.y=y;}}
++class Sprite{
++ constructor(){this.visible=true;this.parent=null;this.listeners=new Map();}
++ addEventListener(name,fn){this.listeners.set(name,fn);}
++ removeEventListener(name,fn){if(this.listeners.get(name)===fn)this.listeners.delete(name);}
++ localToGlobal(){return new Point(this.x,this.y);}
++}
++function fixture(){
++ const services=[],replies=[],stage={stageWidth:2880,stageHeight:1800,scaleMode:'noScale',align:''};
++ const layer={stage,children:[],addChild(s){this.children.push(s);s.parent=this;},removeChild(s){this.children.splice(this.children.indexOf(s),1);s.parent=null;}};
++ const ui={mTooltipsLayer:layer,mA11yCoordinateMarker:null,mA11yBuildControls:true,mA11yKeyboard:true,mA11yKeyboardLease:10000,
++  mA11yBuildCursor:true,mode:2,blocked:false,zone:'954785138800659508',bind:true,
++  A11yWorldHudMode(){return this.mode;},A11yBuildBlocked(){return this.blocked;},
++  A11yBuildBounds(){return {left:8,top:80,right:2872,bottom:1680};},
++  A11yPostToPython(name,text){replies.push([name,decodeURIComponent(text).split('|')]);}};
++ const runtime={Point,Sprite,Stage:Object,Event:{ENTER_FRAME:'frame'},Number,String,Math,isFinite,int:Math.trunc,
++  getTimer:()=>now,encodeURIComponent,
++  getDefinitionByName:()=>({StageWidth:2880,StageHeight:1800}),
++  CommunicationManager:{CallGameService(name,data){
++   services.push([name,data]);if(name==='BBGetCurrentZoneId')return ui.zone;
++   if(name==='BindDisplayObject'&&ui.bind){data.displayObject.x=1440;data.displayObject.y=720;}
++  }}};
++ for(const name of ['A11yCoordinateCancel','A11yCoordinateReply','A11yCoordinateProbe','A11yCoordinateFrame'])ui[name]=method(name,runtime).bind(ui);
++ return {ui,layer,stage,replies,services};
++}
++function request(f,serial=1,zone=f.ui.zone){f.ui.A11yCoordinateProbe(['A11y','coords',String(serial),'10','3','20','0',zone]);}
++let count=0;function test(name,fn){now=0;fn();count++;console.log('PASS '+name);}
++test('native read-only projection returns point and both coordinate dimensions',()=>{
++ const f=fixture();request(f);f.ui.A11yCoordinateFrame({});
++ assert.equal(f.replies[0][0],'a11y.coords_enc');
++ assert.deepStrictEqual(Array.from(f.replies[0][1]),['1',f.ui.zone,'point','1440','720','2880','1800','noScale','','2880','1800','8','80','2872','1680']);
++ assert.equal(f.layer.children.length,0);assert.equal(f.ui.mA11yCoordinateMarker,null);assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('projection uses only zone query, bind and unbind, never input services',()=>{
++ const f=fixture();request(f);f.ui.A11yCoordinateFrame({});
++ assert(f.services.every(([name])=>['BBGetCurrentZoneId','BindDisplayObject','UnbindDisplayObject'].includes(name)));
++});
++test('blocked context is refused without a marker or cursor changes',()=>{
++ const f=fixture();f.ui.blocked=true;request(f);assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.layer.children.length,0);assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('zone mismatch is refused without binding',()=>{
++ const f=fixture();request(f,1,'other');assert.equal(f.replies[0][1][2],'zonechanged');assert(!f.services.some(([n])=>n==='BindDisplayObject'));
++});
++test('mode change cancels an outstanding marker',()=>{
++ const f=fixture();request(f);f.ui.mode=1;f.ui.A11yCoordinateFrame({});assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.layer.children.length,0);
++});
++test('offscreen timeout still supplies viewport measurements and cleans up',()=>{
++ const f=fixture();f.ui.bind=false;request(f);now=2000;f.ui.A11yCoordinateFrame({});
++ assert.equal(f.replies[0][1][2],'viewport');assert.equal(f.replies[0][1][3],'NaN');assert.equal(f.replies[0][1][5],'2880');assert.equal(f.layer.children.length,0);
++});
++test('replacement request cancels its own previous marker only',()=>{
++ const f=fixture();request(f);request(f,2);assert.equal(f.replies[0][1][2],'cancelled');assert.equal(f.layer.children.length,1);
++ f.ui.A11yCoordinateFrame({});assert.equal(f.replies[1][1][0],'2');assert.equal(f.layer.children.length,0);
++});
++test('invalid coordinates never bind or touch any cursor',()=>{
++ const f=fixture();f.ui.A11yCoordinateProbe(['A11y','coords','1','NaN','3','20','0',f.ui.zone]);assert.equal(f.layer.children.length,0);assert.equal(f.services.length,0);
++});
++test('lease expiry before frame cancels without changing existing cursor',()=>{
++ const f=fixture();request(f);now=20000;f.ui.A11yCoordinateFrame({});assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('encoded route adds exactly one probe dispatch',()=>{
++ assert(source.includes('if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }'));
++ const probe=source.slice(source.indexOf('public function A11yCoordinateCancel'),source.indexOf('public function A11yBuildProjectionFrame'));
++ for(const forbidden of ['SetupVirtualCursor','SetVirtualCursorPosition','SendVirtualCursorClick','BBGamepadPlaceMultiple'])assert(!probe.includes(forbidden),forbidden);
++});
++console.log(count+' coordinate probe checks passed (native renderer mocked).');
 diff --git a/tools/test_event_activation_v13.js b/tools/test_event_activation_v13.js
-index dad3689..8ad8c21 100644
+index 8ad8c21..249b371 100644
 --- a/tools/test_event_activation_v13.js
 +++ b/tools/test_event_activation_v13.js
-@@ -36,9 +36,13 @@ test('Activation speaks the unavailable token when the proxy click is refused',(
-  const activate=body('A11yActivate').text;
-  const branch=activate.indexOf('if(this.A11yActionProxy(_loc2_) != _loc2_)');
-  assert(branch>=0,'proxy branch present');
-- const window=activate.slice(branch,branch+600);
-+ // Inspect the entire proxy branch: settings' settled reread can make
-+ // it longer than the old arbitrary 600-character window.
-+ const end=activate.indexOf('if(this.A11yInformational(_loc2_)',branch);
-+ assert(end>branch,'next activation branch present');
-+ const window=activate.slice(branch,end);
-  assert(/if\(!this\.A11yClickControl\(this\.A11yActionProxy\(_loc2_\)\)\)\s*\{\s*this\.A11yPostToPython\("a11y\.widget_enc",encodeURIComponent\("0\|0\|action unavailable"\)\);\s*\}/.test(window),'refused click is announced');
-- assert(/return;/.test(window),'branch still returns');
-+ assert(/return;\s*}\s*$/.test(window),'proxy branch returns before generic dispatch');
+@@ -102,7 +102,7 @@ test('Purchase rows, non-picker owners and cells without Selected are not toggle
+ test('Checkbox state reads Selected on toggle cells before the Checkbox class path',()=>{
+  const state=body('A11yCheckboxState').text;
+  const branch=state.indexOf('if(this.A11yPickerToggleCell(param1))');
+- const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0)');
++ const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0');
+  assert(branch>=0&&checkbox>branch,'toggle-cell branch precedes the Checkbox branch');
+  assert(/return Object\(param1\)\["Selected"\] == true \? "checked" : "unchecked";/.test(state.slice(branch,branch+300)));
  });
- test('Disabled proxy targets are still refused by A11yClickControl',()=>{
-  const click=method('A11yClickControl');
+diff --git a/tools/test_flash_navigation_v10.js b/tools/test_flash_navigation_v10.js
+index c4f2bb7..a693550 100644
+--- a/tools/test_flash_navigation_v10.js
++++ b/tools/test_flash_navigation_v10.js
+@@ -82,6 +82,7 @@ function manager() {
+     A11yMoveInQuote: () => {}, // Move-in context has its own source-executing suite.
+     A11yTransferQuote: () => {}, // Transfer labels have their own suite (test_transfer_labels.js).
+     A11yMoveLabel: () => {}, // Move furnishing labels: test_transfer_labels.js.
++    A11yGraphicsRowLabel: () => {}, // Graphics labels execute in test_options_simplified.js.
+     A11yCalendarHeader: () => false,
+     A11yCalendarLabel: () => '',
+     A11yCompleted: () => false,
 diff --git a/tools/test_options_simplified.js b/tools/test_options_simplified.js
-index c4fdbd9..18ec09c 100644
+index 18ec09c..69e9a5e 100644
 --- a/tools/test_options_simplified.js
 +++ b/tools/test_options_simplified.js
 @@ -47,6 +47,8 @@ function method(name) {
    while (depth) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; end++; }
    const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|Rectangle|Boolean|Number|String|Object|Array|int|Error)\b/g;
    const body = source.slice(start, end - 1).replace(types, '')
-+    .replace(/:\s*\*/g, '')
-+    .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
++    .replace(/for each\(suffix in fields\)/g, 'for (suffix of fields)')
++    .replace(/Object\(node\)\["(dd|lb)" \+ suffix\] as DisplayObject/g, 'asCast(Object(node)["$1" + suffix],DisplayObject)')
+     .replace(/:\s*\*/g, '')
+     .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
      .replace(/\s+as\s+Rectangle\b/g, '')
-     .replace(/((?:Object\([\w.]+\)|[\w.]+)(?:\[[\w."]+\])*)\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)/g, 'asCast($1,$2)')
-     .replace(/\bis\s+(TextField|DisplayObjectContainer)\b/g, 'instanceof $1');
-@@ -170,4 +172,78 @@ test('focus and widget announcements call the row label decorator', () => {
-   assert(/this\.A11yMoveInQuote\(param1,_loc2_\);( this\.A11yTransferQuote\(param1,_loc2_\); this\.A11yMoveLabel\(param1,_loc2_\);)? this\.A11yOptionsRowLabel\(param1,_loc2_\);/.test(source));
- });
+@@ -139,7 +141,8 @@ function optionsRow(label, labelVisible = true) {
+ }
  
--console.log(checks + ' Options simplified checks passed (not in-game verification).');
-+const optionControl = method('A11yOptionsControl');
-+const optionState = method('A11yCheckboxState');
-+const actionProxy = method('A11yActionProxy');
-+function nativeRow(type) {
-+  const row = new DisplayObjectContainer('row', 'widgets.OptionsMenu.controls::OptionsCellView');
-+  row.lbLabel = row.add(new DisplayObjectContainer('lbLabel', 'olympus.controls::JustifiedLabel'));
-+  row.lbLabel.textField = row.lbLabel.add(new TextField('textField', 'Auto Age:'));
-+  for (const [name, kind] of [['cbCheckbox', 'Checkbox'], ['ddDropdown', 'DropdownButton'], ['tbTextButton', 'TextButton']]) {
-+    row[name] = row.add(new DisplayObjectContainer(name, 'olympus.gui.buttons::' + kind));
-+    row[name].visible = name === type; row[name].enabled = true;
-+    row[name].add(new TextField('text', name === 'ddDropdown' ? 'Yes' : 'Ok'));
+ function labelUi() {
+-  const ui = {A11yTextValue: field => field.text};
++  const ui = {A11yTextValue: field => field.text, A11yIsLive: value => !!value && value.visible, A11yJoinedText: value => value.label || ''};
++  ui.A11yGraphicsRowLabel = method('A11yGraphicsRowLabel').bind(ui);
+   ui.A11yIsInside = isInside.bind(ui);
+   ui.A11yOptionsRowLabel = rowLabel.bind(ui);
+   return ui;
+@@ -246,4 +249,44 @@ test('visible native descriptions remain readable and option subclasses work', (
+ test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
+   assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
+ });
++const graphicsFields = ['DisplayType','Resolution','RefreshRate','SceneRes','SimQuality','ObjQuality','LightingQuality','ReflectionQuality','EdgeSmooth','VisualEffect','ViewDistance','VisualQuality'];
++function graphicsFixture(kind='DefaultGraphicsTab') {
++  const tab=new DisplayObjectContainer('graphics','widgets.OptionsMenu.controls.tabs::'+kind);
++  for(const suffix of graphicsFields) {
++    tab['dd'+suffix]=tab.add(new DisplayObjectContainer('dd'+suffix,'olympus.gui.buttons::DropdownButton'));
++    tab['lb'+suffix]=tab.add(new DisplayObject('lb'+suffix));tab['lb'+suffix].label='Localized '+suffix;
 +  }
-+  row.cbCheckbox.Selected = true;
-+  row.txtDescription = row.add(new TextField('txtDescription', 'Explanation')); row.txtDescription.visible = false;
-+  row.txtInformation = row.add(new TextField('txtInformation', 'Information')); row.txtInformation.visible = false;
-+  return row;
++  return tab;
 +}
-+function optionUi() {
-+  const ui = labelUi();
-+  ui.A11yIsLive = value => !!value && value.visible;
-+  ui.A11yOptionsControl = optionControl.bind(ui);
-+  ui.A11ySingleFilterLabel = () => null;
-+  ui.A11yPickerToggleCell = () => false;
-+  ui.A11yCheckboxState = optionState.bind(ui);
-+  ui.A11yActionProxy = actionProxy.bind(ui);
-+  ui.A11yCollectText = (value, lines) => {
-+    if (!value || !value.visible) return;
-+    if (value instanceof TextField) lines.push('0|0|' + value.text);
-+    else for (const child of value.children || []) ui.A11yCollectText(child, lines);
-+  };
-+  return ui;
-+}
-+test('each option type routes to its visible native control, including disabled controls', () => {
-+  const ui = optionUi();
-+  for (const type of ['cbCheckbox', 'ddDropdown', 'tbTextButton']) {
-+    const row = nativeRow(type);
-+    assert.equal(ui.A11yActionProxy(row), row[type]);
-+    row[type].enabled = false;
-+    assert.equal(ui.A11yActionProxy(row), row[type]);
++test('all twelve Graphics dropdowns read their localized name before the value on Windows and Mac',()=>{
++  for(const kind of ['GraphicsTab','DefaultGraphicsTab','MacGraphicsTab']) for(const suffix of graphicsFields) {
++    const tab=graphicsFixture(kind),ui=labelUi(),value=tab['dd'+suffix].add(new TextField('value','Low')),lines=['0|0|Low'];
++    ui.A11yOptionsRowLabel(value,lines);
++    assert.deepStrictEqual(lines,['-999998|0|Localized '+suffix,'0|0|Low']);
 +  }
 +});
-+test('dropdowns never announce hidden checkbox state or hidden placeholder text', () => {
-+  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = ['old hidden Ok'];
-+  ui.A11yOptionsRowLabel(row, lines);
-+  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes']);
-+  assert.equal(ui.A11yCheckboxState(row), '');
++test('Graphics button focus gets one label and does not alter native control state',()=>{
++  const tab=graphicsFixture(),ui=labelUi(),control=tab.ddResolution,lines=['0|0|2880x1800'];
++  control.enabled=false;ui.A11yOptionsRowLabel(control,lines);
++  assert.deepStrictEqual(lines,['-999998|0|Localized Resolution','0|0|2880x1800']);assert.equal(control.enabled,false);
 +});
-+test('checkbox reads current selection without its unlabelled Ok artwork', () => {
-+  const ui = optionUi(), row = nativeRow('cbCheckbox'), lines = [];
-+  ui.A11yOptionsRowLabel(row, lines);
-+  assert.deepStrictEqual(lines, ['0|0|Auto Age:']);
-+  assert.equal(ui.A11yCheckboxState(row), 'checked');
-+  row.cbCheckbox.Selected = false;
-+  assert.equal(ui.A11yCheckboxState(row), 'unchecked');
++test('hidden and missing Graphics labels preserve the value',()=>{
++ for(const missing of [false,true]) {
++  const tab=graphicsFixture(),ui=labelUi(),lines=['0|0|Low'];
++  if(missing) delete tab.lbSimQuality;else tab.lbSimQuality.visible=false;
++  ui.A11yOptionsRowLabel(tab.ddSimQuality,lines);assert.deepStrictEqual(lines,['0|0|Low']);
++ }
 +});
-+test('description rows and unrelated controls do not acquire an action or checkbox state', () => {
-+  const ui = optionUi(), row = nativeRow(null);
-+  assert.equal(ui.A11yOptionsControl(row), null);
-+  assert.equal(ui.A11yCheckboxState(row), '');
-+  const other = new DisplayObject('other', 'widgets.Pickers::OptionsCellView');
-+  other.cbCheckbox = nativeRow('cbCheckbox').cbCheckbox;
-+  assert.equal(ui.A11yOptionsControl(other), null);
-+  assert.equal(ui.A11yActionProxy(other), other);
++test('Graphics popup choices, checkboxes and unrelated tabs retain their existing speech',()=>{
++ const ui=labelUi(),tab=graphicsFixture(),check=tab.add(new DisplayObject('check')),popup=new DisplayObjectContainer('popup','olympus.gui.lists::ExpandableList');
++ for(const control of [check,popup.add(new TextField('choice','High')),graphicsFixture('OtherTab').ddSimQuality]) {
++  const lines=['0|0|original'];ui.A11yOptionsRowLabel(control,lines);assert.deepStrictEqual(lines,['0|0|original']);
++ }
 +});
-+test('visible native descriptions remain readable and option subclasses work', () => {
-+  const ui = optionUi(), row = nativeRow('ddDropdown'), lines = [];
-+  row.kind = 'widgets.OptionsMenu.controls::GameplayTabOptionsCellView';
-+  row.txtDescription.visible = true;
-+  ui.A11yOptionsRowLabel(row, lines);
-+  assert.deepStrictEqual(lines, ['0|0|Auto Age:', '0|0|Yes', '0|0|Explanation']);
++test('native Graphics LeftLabelCheckBox reports its actual Selected state',()=>{
++ const ui=optionUi(),box=new DisplayObject('cbLaptopMode','widgets.OptionsMenu::LeftLabelCheckBox');
++ box.Selected=true;assert.equal(ui.A11yCheckboxState(box),'checked');
++ box.Selected=false;assert.equal(ui.A11yCheckboxState(box),'unchecked');
++ box.kind='unrelated::LeftLabelCheckBox';assert.equal(ui.A11yCheckboxState(box),'');
 +});
-+test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
-+  assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
-+});
-+console.log(checks + ' Options simplified checks passed (not in-game verification).');
+ console.log(checks + ' Options simplified checks passed (not in-game verification).');

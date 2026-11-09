@@ -82,7 +82,8 @@ class Frame:
             raise ValueError('Non-finite viewport')
         if not (100 <= width <= 100000 and 100 <= height <= 100000): raise ValueError('Invalid viewport')
         if mode not in ('noScale','exactFit','showAll','noBorder'): raise ValueError('Unverified stage scale mode: '+mode)
-        if align not in ('','T','B','L','R','TL','TR','BL','BR'):raise ValueError('Unknown stage alignment')
+        if mode in ('showAll','noBorder') and align not in ('','T','B','L','R','TL','TR','BL','BR','LT','RT','LB','RB'):
+            raise ValueError('Unknown stage alignment: '+repr(align))
         if min(layout) < 100 or not (0 <= bounds[0] < bounds[2] <= layout[0] and 0 <= bounds[1] < bounds[3] <= layout[1]):
             raise ValueError('Invalid build bounds')
         self.zone,self.width,self.height,self.mode,self.geometry=zone,width,height,mode,geometry
@@ -149,6 +150,7 @@ def _measure(x,z,level,height=0.0,timeout=3.0):
         if not result or result['status'] not in ('point','viewport'):raise RuntimeError('Projection refused: '+str(result))
         after=capture_window()
         if before!=after:raise RuntimeError('Game window changed during projection')
+        _log('raw-measure',response=result,window=after)
         frame=Frame(result['zone'],result['width'],result['height'],result['mode'],result['bounds'],result['layout'],after,result['align'])
         _frame=frame
         _log('measure',response=result,window=after)

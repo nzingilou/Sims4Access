@@ -1,7 +1,1 @@
-Game Options fix for game 1.129.39.1030
-
-Close the game before replacing packages. TS4_Access_UI.package goes in Mods/TS4_Access. With UI Cheats, TS4_Access_Compatibility_UICheats.package goes in the existing higher-priority Mods/_Overrides folder. Keep your current script and settings. Back up the previous UI pair first and clear localthumbcache.package after replacement.
-
-In Gameplay, Enter on Auto Age (Played Households) should open the native choices; arrows and Enter select a value. Enter or Space on Auto Age (Unplayed Households) should toggle and read its state. Use Apply Changes to save. Check a Pack Settings checkbox and an Audio/Graphics control as well. Close Options and verify scanner Enter still opens an object's menu.
-
-To roll back, close the game and restore the backed-up UI pair.
+In Build Mode, enable logging and enter a11y.buildcoords 5. Close the console and wait eight seconds. This diagnostic does not move the pointer or build. Then test a small house helper on a backed-up save. Install the script in Mods/TS4_Access and the standard UI there; install the UI Cheats compatibility package in Mods/_Overrides only when using UI Cheats. Keep the three files paired.

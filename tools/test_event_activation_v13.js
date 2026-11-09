@@ -102,7 +102,7 @@ test('Purchase rows, non-picker owners and cells without Selected are not toggle
 test('Checkbox state reads Selected on toggle cells before the Checkbox class path',()=>{
  const state=body('A11yCheckboxState').text;
  const branch=state.indexOf('if(this.A11yPickerToggleCell(param1))');
- const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0)');
+ const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0');
  assert(branch>=0&&checkbox>branch,'toggle-cell branch precedes the Checkbox branch');
  assert(/return Object\(param1\)\["Selected"\] == true \? "checked" : "unchecked";/.test(state.slice(branch,branch+300)));
 });

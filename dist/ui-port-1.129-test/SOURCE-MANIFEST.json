@@ -1,26 +1,61 @@
 {
-  "git_base": "4ce00a423d2ae7a63cdf22388d4b742ab681b093",
-  "patch_sha256": "d0d4a9c49900d74bde0107fcb34863259ee6a40c1c7bc0b1204d992bed1b5f19",
+  "git_base": "127ec613e8a430ee841cca54d617901f1409ea56",
+  "patch_sha256": "21acbfb3c7f101508e9bf096b4513b340d5da6ca90701a700f104435e5d8145e",
   "files": [
     {
-      "path": "flash/TooltipManager_patched.as",
-      "before_sha256": "44c79ed62239ee5ff35a48b3ee19ec3d365c2a13a2af683013979ae8bedb5eb6",
-      "after_sha256": "9653ba04fa5e51eb86e87d5531536903c4a025e3deaffcd25e8cf79955c15dcc"
+      "path": "CHEATS.txt",
+      "before_sha256": "290e073ebf43670b3c24f2f32d18980b84f4f6d5718955507d17dceb2df7a448",
+      "after_sha256": "c7b6fcf50a7898470d31c503d8402765ecfda0dc334b96c494fbd60786fc9182"
     },
     {
-      "path": "tools/test_options_simplified.js",
-      "before_sha256": "565e6cfa7c362fcce9fdcb43e0dbf31e7bbdab15ebc3d18baaf7494bdae902b9",
-      "after_sha256": "de113e81d082548f5eada79d3ec2dc5c3737c8a332c74d181415104fbd37d977"
+      "path": "Scripts/tyjokr_a11y_build_coordinates.py",
+      "before_sha256": null,
+      "after_sha256": "91a34d5d32ca1e7c68b4c749c1f855cce3cb9b8b32e747a1c4d199bb7dac19f1"
+    },
+    {
+      "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
+      "before_sha256": "d5d85359e0e5a87e139db4093b179471b053ab8349d93a25b56181dbbd4c327e",
+      "after_sha256": "6dae5e3461e3a492fdc9d8185942e306a9734c4a955c88f6224fcf13397c8132"
+    },
+    {
+      "path": "docs/development/changes/graphics-option-labels.md",
+      "before_sha256": null,
+      "after_sha256": "ccf2406402093552ecdd10fb2a12a1507265681f66afc5e9bd7fd9140f152eba"
+    },
+    {
+      "path": "docs/development/changes/measured-build-coordinates.md",
+      "before_sha256": null,
+      "after_sha256": "58cf985993ccb529e4d038e0a5146cf70fe4f67d44090268f7b8d89805e98830"
+    },
+    {
+      "path": "flash/TooltipManager_patched.as",
+      "before_sha256": "9653ba04fa5e51eb86e87d5531536903c4a025e3deaffcd25e8cf79955c15dcc",
+      "after_sha256": "b04df0fa3b9f30624739547ae44ffb72a437a9c2f54eab2db172d81696e8ed97"
+    },
+    {
+      "path": "tools/test_build_coordinates.py",
+      "before_sha256": null,
+      "after_sha256": "51619f9aea904b136275853e51a75abf79f607b8af1a6568b3e91df3f6856392"
+    },
+    {
+      "path": "tools/test_coordinate_probe.js",
+      "before_sha256": null,
+      "after_sha256": "861fa7aead20e17a42f08ba9441291ff8419fa689ffc5b7f9ebc4a40d87f056d"
     },
     {
       "path": "tools/test_event_activation_v13.js",
-      "before_sha256": "fe797b167a1991bb35cfd7ed21263bb589cde5e9719d4992a0d5a8b054c0742f",
-      "after_sha256": "e93040777817b4643868f08c4c760d4bbe73c2f4ecfb15b166bb368fc1d05e0c"
+      "before_sha256": "e93040777817b4643868f08c4c760d4bbe73c2f4ecfb15b166bb368fc1d05e0c",
+      "after_sha256": "f751431bdf67c7df59859383b80eece119d429ef2ba31d715e45f544046c2019"
     },
     {
-      "path": "docs/development/changes/options-settings.md",
-      "before_sha256": null,
-      "after_sha256": "9d6f52e1aa6c1c5e9b1a2ac145958dc306b05a3f060db491c1200025d9f378da"
+      "path": "tools/test_flash_navigation_v10.js",
+      "before_sha256": "ea3dbebe6dd5d71503e52f982cc840eabba8eaa25a31372f13624864c390013d",
+      "after_sha256": "697d318401f56fca07c76a16c491f37b8ed2c3fa49ea85f62eea66dfd3ab7922"
+    },
+    {
+      "path": "tools/test_options_simplified.js",
+      "before_sha256": "de113e81d082548f5eada79d3ec2dc5c3737c8a332c74d181415104fbd37d977",
+      "after_sha256": "69d7a941997a3bdb3df74587b87331848ccb49bb30dbaf1a87dfeb551acb1034"
     }
   ]
 }

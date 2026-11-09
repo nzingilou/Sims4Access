@@ -47,6 +47,8 @@ function method(name) {
   while (depth) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; end++; }
   const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|Rectangle|Boolean|Number|String|Object|Array|int|Error)\b/g;
   const body = source.slice(start, end - 1).replace(types, '')
+    .replace(/for each\(suffix in fields\)/g, 'for (suffix of fields)')
+    .replace(/Object\(node\)\["(dd|lb)" \+ suffix\] as DisplayObject/g, 'asCast(Object(node)["$1" + suffix],DisplayObject)')
     .replace(/:\s*\*/g, '')
     .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
     .replace(/\s+as\s+Rectangle\b/g, '')
@@ -139,7 +141,8 @@ function optionsRow(label, labelVisible = true) {
 }
 
 function labelUi() {
-  const ui = {A11yTextValue: field => field.text};
+  const ui = {A11yTextValue: field => field.text, A11yIsLive: value => !!value && value.visible, A11yJoinedText: value => value.label || ''};
+  ui.A11yGraphicsRowLabel = method('A11yGraphicsRowLabel').bind(ui);
   ui.A11yIsInside = isInside.bind(ui);
   ui.A11yOptionsRowLabel = rowLabel.bind(ui);
   return ui;
@@ -245,5 +248,45 @@ test('visible native descriptions remain readable and option subclasses work', (
 });
 test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
   assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
+});
+const graphicsFields = ['DisplayType','Resolution','RefreshRate','SceneRes','SimQuality','ObjQuality','LightingQuality','ReflectionQuality','EdgeSmooth','VisualEffect','ViewDistance','VisualQuality'];
+function graphicsFixture(kind='DefaultGraphicsTab') {
+  const tab=new DisplayObjectContainer('graphics','widgets.OptionsMenu.controls.tabs::'+kind);
+  for(const suffix of graphicsFields) {
+    tab['dd'+suffix]=tab.add(new DisplayObjectContainer('dd'+suffix,'olympus.gui.buttons::DropdownButton'));
+    tab['lb'+suffix]=tab.add(new DisplayObject('lb'+suffix));tab['lb'+suffix].label='Localized '+suffix;
+  }
+  return tab;
+}
+test('all twelve Graphics dropdowns read their localized name before the value on Windows and Mac',()=>{
+  for(const kind of ['GraphicsTab','DefaultGraphicsTab','MacGraphicsTab']) for(const suffix of graphicsFields) {
+    const tab=graphicsFixture(kind),ui=labelUi(),value=tab['dd'+suffix].add(new TextField('value','Low')),lines=['0|0|Low'];
+    ui.A11yOptionsRowLabel(value,lines);
+    assert.deepStrictEqual(lines,['-999998|0|Localized '+suffix,'0|0|Low']);
+  }
+});
+test('Graphics button focus gets one label and does not alter native control state',()=>{
+  const tab=graphicsFixture(),ui=labelUi(),control=tab.ddResolution,lines=['0|0|2880x1800'];
+  control.enabled=false;ui.A11yOptionsRowLabel(control,lines);
+  assert.deepStrictEqual(lines,['-999998|0|Localized Resolution','0|0|2880x1800']);assert.equal(control.enabled,false);
+});
+test('hidden and missing Graphics labels preserve the value',()=>{
+ for(const missing of [false,true]) {
+  const tab=graphicsFixture(),ui=labelUi(),lines=['0|0|Low'];
+  if(missing) delete tab.lbSimQuality;else tab.lbSimQuality.visible=false;
+  ui.A11yOptionsRowLabel(tab.ddSimQuality,lines);assert.deepStrictEqual(lines,['0|0|Low']);
+ }
+});
+test('Graphics popup choices, checkboxes and unrelated tabs retain their existing speech',()=>{
+ const ui=labelUi(),tab=graphicsFixture(),check=tab.add(new DisplayObject('check')),popup=new DisplayObjectContainer('popup','olympus.gui.lists::ExpandableList');
+ for(const control of [check,popup.add(new TextField('choice','High')),graphicsFixture('OtherTab').ddSimQuality]) {
+  const lines=['0|0|original'];ui.A11yOptionsRowLabel(control,lines);assert.deepStrictEqual(lines,['0|0|original']);
+ }
+});
+test('native Graphics LeftLabelCheckBox reports its actual Selected state',()=>{
+ const ui=optionUi(),box=new DisplayObject('cbLaptopMode','widgets.OptionsMenu::LeftLabelCheckBox');
+ box.Selected=true;assert.equal(ui.A11yCheckboxState(box),'checked');
+ box.Selected=false;assert.equal(ui.A11yCheckboxState(box),'unchecked');
+ box.kind='unrelated::LeftLabelCheckBox';assert.equal(ui.A11yCheckboxState(box),'');
 });
 console.log(checks + ' Options simplified checks passed (not in-game verification).');

@@ -6210,8 +6210,49 @@ package olympus.core
          return null;
       }
 
+      public function A11yGraphicsRowLabel(item:DisplayObject, result:Array) : void
+      {
+         var node:DisplayObject = item;
+         var depth:int = 0;
+         var name:String = "";
+         var suffix:String = "";
+         var control:DisplayObject = null;
+         var label:DisplayObject = null;
+         var text:String = "";
+         var fields:Array = ["DisplayType","Resolution","RefreshRate","SceneRes","SimQuality","ObjQuality","LightingQuality","ReflectionQuality","EdgeSmooth","VisualEffect","ViewDistance","VisualQuality"];
+         try
+         {
+            while(node != null && depth < 8)
+            {
+               name = getQualifiedClassName(node);
+               if(name == "widgets.OptionsMenu.controls.tabs::DefaultGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::MacGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::GraphicsTab")
+               {
+                  for each(suffix in fields)
+                  {
+                     if(("dd" + suffix) in node && ("lb" + suffix) in node)
+                     {
+                        control = Object(node)["dd" + suffix] as DisplayObject;
+                        label = Object(node)["lb" + suffix] as DisplayObject;
+                        if(this.A11yIsLive(control) && this.A11yIsLive(label) && this.A11yIsInside(item,control))
+                        {
+                           text = this.A11yJoinedText(label);
+                           if(text != null && text.length > 0) { result.unshift("-999998|0|" + text); }
+                           return;
+                        }
+                     }
+                  }
+                  return;
+               }
+               node = node.parent;
+               depth = depth + 1;
+            }
+         }
+         catch(e:Error) { }
+      }
+
       public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
       {
+         this.A11yGraphicsRowLabel(item,result);
          var node:DisplayObject = item;
          var depth:int = 0;
          var label:Object = null;
@@ -7829,7 +7870,7 @@ package olympus.core
             {
                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
             }
-            if(_loc2_.indexOf("Checkbox") >= 0)
+            if(_loc2_.indexOf("Checkbox") >= 0 || _loc2_ == "widgets.OptionsMenu::LeftLabelCheckBox")
             {
                _loc5_ = param1;
                if(_loc5_.Selected == true)

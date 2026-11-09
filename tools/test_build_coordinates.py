@@ -89,6 +89,17 @@ class Tests(unittest.TestCase):
   self.assertEqual(f.client(960,540),(960,600))
   with self.assertRaises(ValueError):f.client(0,0)
   with self.assertRaises(ValueError):c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g,'?')
+ def test_alignment_order_variants_map_identically(self):
+  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
+  for mode in ('showAll','noBorder'):
+   for a,b in [('TL','LT'),('TR','RT'),('BL','LB'),('BR','RB')]:
+    first=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,a)
+    second=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,b)
+    self.assertEqual(first.client(960,540),second.client(960,540))
+ def test_nonuniform_mapping_does_not_depend_on_alignment(self):
+  for mode in ('noScale','exactFit'):
+   f=c.Frame(1,1440,900,mode,(8,80,1432,780),(1440,900),G,'unrecognized')
+   self.assertEqual(f.client(720,450),(1440,900))
  def test_unsafe_panel_points_not_clear(self):
   self.assertFalse(c.clear_of_panels((100,20)));self.assertFalse(c.clear_of_panels((100,1700)))
   self.assertTrue(c.clear_of_panels((1440,800)))

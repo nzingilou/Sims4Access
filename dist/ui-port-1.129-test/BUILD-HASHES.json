@@ -1,32 +1,28 @@
 {
-  "game_version": "1.129.39.1030",
-  "git_base": "d7c59d5281ebb509a2265f3ebe17d1d94353f06b",
-  "status": "offline-validated settings test candidate; in-game settings verification pending",
-  "game_ui_sha256": "6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83",
-  "ui_cheats_input_sha256": "95d177c7ceed605474983c5affdc1eda7a097a5b37148419c2c33fd746b69d94",
-  "ffdec": "26.2.1",
-  "jdk": "Microsoft 21.0.9",
+  "base_commit": "127ec613e8a430ee841cca54d617901f1409ea56",
+  "base_script_sha256": "20615b1db277b43fad04cd6501632cda9b9bbadaadae318f7064e47d408e30db",
+  "changed_entries": [
+    "tyjokr_a11y_contrib.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_build_coordinates.pyc"
+  ],
+  "unchanged_entries": 60,
   "python": "3.7.9",
-  "standard_movies": 25,
-  "compatibility_movies": 6,
-  "fidelity_target_comparisons": {
-    "standard": 62,
-    "compatibility": 19
-  },
-  "handler_methods": 39,
-  "handler_copies": 29,
-  "regression_suites": 113,
-  "reported_checks": 1531,
-  "input_stable": true,
+  "script_sha256": "d3f1d1e334d49df3754c49e47765f74b25aee62b5dd1561aa1386d829807f381",
+  "status": "candidate; native in-game validation pending",
   "files": {
-    "TS4_Access_UI.package": "88ff172932cc47dad64b2f6440ed58dab3416e1ad960c221f3e00d4f2907abe6",
-    "TS4_Access_Compatibility_UICheats.package": "63daf097bf6d56194b1544303cc59273a5606827212827211ff6bca21b6bb6cc"
+    "TS4_Access.ts4script": "d3f1d1e334d49df3754c49e47765f74b25aee62b5dd1561aa1386d829807f381",
+    "TS4_Access_UI.package": "65c78a47ac169a35144194385b047a0eb2a71f2b93a98f5bd6d86fa8f83f14c7",
+    "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
   },
-  "purchase_fix_base": "d2696214818f06a279c879581c57b98ac141aaa6",
-  "purchase_footer_guard_copies": 29,
-  "panel_fix_base": "9abe4aec192a8432de57c1b05d591d56bcb1b9ce",
-  "panel_helper_copies": 29,
-  "settings_fix_base": "4ce00a423d2ae7a63cdf22388d4b742ab681b093",
-  "settings_helper_copies": 29,
-  "settings_routing_methods": 44
+  "validation": {
+    "passing_suites": 117,
+    "reported_checks": 1570,
+    "environment_timeout": "unchanged PowerShell prelaunch helper",
+    "compiled_adapter_tests": 31,
+    "compiled_handler_copies": 29,
+    "ui_pipeline": "passed",
+    "in_game": "read-only native projection passed 2026-11-09 22:48 at 2880x1800 and 200 percent Windows scaling; house drawing and Graphics speech pending"
+  }
 }

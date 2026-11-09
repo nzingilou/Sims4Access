@@ -82,6 +82,7 @@ function manager() {
     A11yMoveInQuote: () => {}, // Move-in context has its own source-executing suite.
     A11yTransferQuote: () => {}, // Transfer labels have their own suite (test_transfer_labels.js).
     A11yMoveLabel: () => {}, // Move furnishing labels: test_transfer_labels.js.
+    A11yGraphicsRowLabel: () => {}, // Graphics labels execute in test_options_simplified.js.
     A11yCalendarHeader: () => false,
     A11yCalendarLabel: () => '',
     A11yCompleted: () => false,

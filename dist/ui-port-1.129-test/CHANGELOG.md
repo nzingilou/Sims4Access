@@ -1,4 +1,7 @@
-# Game Options fix
+# Build coordinate adapter
 
-- Activate Gameplay, Pack Settings and other native option rows through their actual checkbox, dropdown or button.
-- Read the current option value/checkbox state without hidden artwork or placeholder text; announce checkbox changes after activation.
+- Measure native world projection and UI dimensions instead of assuming a screen resolution or multiplying by Windows scaling.
+- Map through the current game window, including window offsets and multiple monitors.
+- Stop pointer operations when focus, window geometry, DPI or Build Mode changes.
+- Add `a11y.buildcoords 5`, a read-only projection diagnostic.
+- Announce localized names for all twelve Graphics dropdowns and checked/unchecked for the native Graphics checkboxes.
