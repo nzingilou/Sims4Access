@@ -1,21 +1,31 @@
 {
   "git_base": "127ec613e8a430ee841cca54d617901f1409ea56",
-  "patch_sha256": "21acbfb3c7f101508e9bf096b4513b340d5da6ca90701a700f104435e5d8145e",
+  "patch_sha256": "6e598ea47cf8d02f2eb47b8c63e79f1dcb40829412e3c73fc42b0b3f8a42d84b",
   "files": [
-    {
-      "path": "CHEATS.txt",
-      "before_sha256": "290e073ebf43670b3c24f2f32d18980b84f4f6d5718955507d17dceb2df7a448",
-      "after_sha256": "c7b6fcf50a7898470d31c503d8402765ecfda0dc334b96c494fbd60786fc9182"
-    },
     {
       "path": "Scripts/tyjokr_a11y_build_coordinates.py",
       "before_sha256": null,
       "after_sha256": "91a34d5d32ca1e7c68b4c749c1f855cce3cb9b8b32e747a1c4d199bb7dac19f1"
     },
     {
+      "path": "Scripts/tyjokr_a11y_build_helpers.py",
+      "before_sha256": null,
+      "after_sha256": "9beabef57c4e4f5a5c4f88c66b6c855189c60710fc72aec5f5459e947d91f0dd"
+    },
+    {
       "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
       "before_sha256": "d5d85359e0e5a87e139db4093b179471b053ab8349d93a25b56181dbbd4c327e",
-      "after_sha256": "6dae5e3461e3a492fdc9d8185942e306a9734c4a955c88f6224fcf13397c8132"
+      "after_sha256": "e4f1949187f678e22a12768430a8e04385a62aa791904bbd0dfdad3f7ad17a84"
+    },
+    {
+      "path": "docs/development/audits/requested-ui-2026-11-09.md",
+      "before_sha256": null,
+      "after_sha256": "746848597ed2eaa6396cf8d29ebf9a277d7c8146010c315595ddff33ce2b316b"
+    },
+    {
+      "path": "docs/development/changes/build-helper-integration.md",
+      "before_sha256": null,
+      "after_sha256": "45e8528650f9979a5a60e5365d5d68d055e5455a6b63c079cd89895b31bec55b"
     },
     {
       "path": "docs/development/changes/graphics-option-labels.md",
@@ -28,14 +38,14 @@
       "after_sha256": "58cf985993ccb529e4d038e0a5146cf70fe4f67d44090268f7b8d89805e98830"
     },
     {
-      "path": "flash/TooltipManager_patched.as",
-      "before_sha256": "9653ba04fa5e51eb86e87d5531536903c4a025e3deaffcd25e8cf79955c15dcc",
-      "after_sha256": "b04df0fa3b9f30624739547ae44ffb72a437a9c2f54eab2db172d81696e8ed97"
-    },
-    {
       "path": "tools/test_build_coordinates.py",
       "before_sha256": null,
       "after_sha256": "51619f9aea904b136275853e51a75abf79f607b8af1a6568b3e91df3f6856392"
+    },
+    {
+      "path": "tools/test_build_helpers.py",
+      "before_sha256": null,
+      "after_sha256": "5783140708605d626317cf8079c3b5c574e7383de1925eaaab04f6f23248a0a1"
     },
     {
       "path": "tools/test_coordinate_probe.js",

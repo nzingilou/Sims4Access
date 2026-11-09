@@ -5,14 +5,15 @@
     "tyjokr_a11y_contrib.pyc"
   ],
   "added_entries": [
-    "tyjokr_a11y_build_coordinates.pyc"
+    "tyjokr_a11y_build_coordinates.pyc",
+    "tyjokr_a11y_build_helpers.pyc"
   ],
   "unchanged_entries": 60,
   "python": "3.7.9",
-  "script_sha256": "d3f1d1e334d49df3754c49e47765f74b25aee62b5dd1561aa1386d829807f381",
+  "script_sha256": "7532536027775320a66ea9c666fc67bad6f19725acc9ed2884e41dac1d3cc577",
   "status": "candidate; native in-game validation pending",
   "files": {
-    "TS4_Access.ts4script": "d3f1d1e334d49df3754c49e47765f74b25aee62b5dd1561aa1386d829807f381",
+    "TS4_Access.ts4script": "7532536027775320a66ea9c666fc67bad6f19725acc9ed2884e41dac1d3cc577",
     "TS4_Access_UI.package": "65c78a47ac169a35144194385b047a0eb2a71f2b93a98f5bd6d86fa8f83f14c7",
     "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
   },
@@ -23,6 +24,6 @@
     "compiled_adapter_tests": 31,
     "compiled_handler_copies": 29,
     "ui_pipeline": "passed",
-    "in_game": "read-only native projection passed 2026-11-09 22:48 at 2880x1800 and 200 percent Windows scaling; house drawing and Graphics speech pending"
+    "in_game": "Ground-floor rooms validated; upper-floor helper fix installed, retest pending"
   }
 }

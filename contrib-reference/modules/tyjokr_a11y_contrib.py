@@ -464,6 +464,11 @@ def install():
         tyjokr_a11y_build_coordinates.install()
     except Exception as ex:
         _log("measured build coordinates did not load: {!r}".format(ex))
+    try:
+        import tyjokr_a11y_build_helpers
+        tyjokr_a11y_build_helpers.install()
+    except Exception as ex:
+        _log("build helper integration did not load: {!r}".format(ex))
     _log("narrow contribution layer installed")
 
 

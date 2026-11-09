@@ -1,13 +1,3 @@
-diff --git a/CHEATS.txt b/CHEATS.txt
-index e274f39..c888293 100644
---- a/CHEATS.txt
-+++ b/CHEATS.txt
-@@ -49,3 +49,5 @@ a11y.scan rescan: Refresh the scanner.
- 
- Settings commands save your preferences. Updating the mod preserves your
- settings file; the release ZIP does not replace it.
-+
-+a11y.buildcoords 5: Read-only native projection and screen-mapping check. In Build Mode, close the console and wait eight seconds. Does not move the pointer or build.
 diff --git a/Scripts/tyjokr_a11y_build_coordinates.py b/Scripts/tyjokr_a11y_build_coordinates.py
 new file mode 100644
 index 0000000..3e82d5c
@@ -329,11 +319,171 @@ index 0000000..3e82d5c
 +    timer=threading.Timer(max(0,min(30,delay)),work);timer.daemon=True;timer.name='a11y_build_coordinate_check';timer.start()
 +    sims4.commands.CheatOutput(_connection)('Read-only projection check scheduled. Close the console and keep Build Mode focused.')
 +    return True
+diff --git a/Scripts/tyjokr_a11y_build_helpers.py b/Scripts/tyjokr_a11y_build_helpers.py
+new file mode 100644
+index 0000000..d3e975c
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_build_helpers.py
+@@ -0,0 +1,154 @@
++"""Narrow integration fixes for the existing house/structure helpers."""
++import contextlib
++import math
++import time
++
++_build = None
++_coordinates = None
++
++
++def _log(kind, **data):
++    import tyjokr_a11y_speech as speech
++    import json
++    speech.log_line('build helpers: ' + json.dumps(dict(kind=kind, **data), sort_keys=True, default=str))
++
++
++def _state():
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_keys as keys
++    if not _build.in_build_mode() or keys.blocking_active() or keys._editing_active:
++        raise RuntimeError('Close the game dialog before changing floors')
++    lot = services.active_lot()
++    if lot is None: raise RuntimeError('No active lot')
++    floor = _build.current_floor()
++    if floor is None: raise RuntimeError('The game has not reported its current floor')
++    return {'zone': int(services.current_zone_id()), 'floor': int(floor),
++            'center': (float(lot.center.x), float(lot.center.z)),
++            'grid': bool(grid.build_cursor()), 'owner': bool(keys._build_grid_owner)}
++
++
++def _same_world(state):
++    import services
++    import tyjokr_a11y_keys as keys
++    return (_build.in_build_mode() and int(services.current_zone_id()) == state['zone']
++            and not keys.blocking_active() and not keys._editing_active)
++
++
++def _grid_message(message):
++    import tyjokr_a11y_grid as grid
++    grid._flash(message)
++
++
++def _grid_released():
++    import tyjokr_a11y_keys as keys
++    return not keys._build_grid_owner
++
++
++def _restore_grid(state):
++    import services
++    import tyjokr_a11y_grid as grid
++    if (state['grid'] and _build.in_build_mode() and
++            int(services.current_zone_id()) == state['zone'] and grid.build_cursor()):
++        grid._flash('A11yBuildGridOn')
++        return True
++    return False
++
++
++@contextlib.contextmanager
++def _floor_input(state):
++    u = _coordinates._api()
++    sent_off = False
++    try:
++        with _coordinates.physical_context(u):
++            geometry = _coordinates.window(u)
++            if state['grid'] or state['owner']:
++                # Only release native key ownership. Preserve the Python grid's
++                # tile, height, room focus, orientation and enabled setting.
++                sent_off = True
++                _build.on_main(_grid_message, 'A11yBuildGridOff')
++                # A fresh native request is an ordered UI round trip after Off.
++                # It does not move any cursor or click. Never inject a floor key
++                # before the native guard and script owner have both released.
++                _coordinates._measure(state['center'][0], state['center'][1], state['floor'])
++                deadline = time.monotonic() + 2.0
++                while not _build.on_main(_grid_released):
++                    if time.monotonic() >= deadline: raise RuntimeError('Grid ownership did not release')
++                    time.sleep(.02)
++                _log('floor-ownership-released', zone=state['zone'])
++            yield u, geometry
++    finally:
++        if sent_off:
++            restored = _build.on_main(_restore_grid, state)
++            _log('floor-ownership-restored', zone=state['zone'], restored=bool(restored))
++
++
++def set_floor(level):
++    """Change the native floor without feeding Page Up/Down to the grid."""
++    try:
++        if isinstance(level, bool) or not isinstance(level, (int, float)) or not math.isfinite(level) or int(level) != level:
++            return False
++        level = int(level)
++    except (ValueError, OverflowError):
++        return False
++    try:
++        state = _build.on_main(_state)
++        if state is None: raise RuntimeError('Simulation thread did not answer')
++        if state['floor'] == level: return True
++        with _floor_input(state) as (u, geometry):
++            unchanged = 0
++            previous = state['floor']
++            for _ in range(min(64, 3 * (abs(level - previous) + 1))):
++                if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
++                    raise RuntimeError('Game focus, window or Build context changed')
++                if not _build.on_main(_grid_released):
++                    raise RuntimeError('The grid reclaimed the floor keys')
++                if any(u.GetAsyncKeyState(key) & 0x8000 for key in (16,17,18,91,92)):
++                    raise RuntimeError('Release modifier keys before changing floors')
++                current = _build.on_main(_build.current_floor)
++                if current is None: raise RuntimeError('Native floor unavailable')
++                if current == level:
++                    _log('floor-confirmed', wanted=level, actual=current)
++                    return True
++                key, scan = (33, 0x49) if current < level else (34, 0x51)
++                if (not _build.on_main(_same_world, state) or _coordinates.window(u) != geometry
++                        or u.GetAsyncKeyState(key) & 0x8000):
++                    raise RuntimeError('Input context changed before the floor key')
++                pressed = False
++                try:
++                    u.keybd_event(key, scan, 1, 0); pressed = True
++                    time.sleep(.05)
++                finally:
++                    if pressed: u.keybd_event(key, scan, 3, 0)
++                time.sleep(1.25)
++                actual = _build.on_main(_build.current_floor)
++                _log('floor-step', wanted=level, before=current, actual=actual)
++                unchanged = unchanged + 1 if actual == current else 0
++                if actual == level: return True
++                if actual is None or unchanged >= 3: return False
++            return False
++    except Exception as exc:
++        _log('floor-refused', wanted=level, error=str(exc))
++        return False
++
++
++def _build_menu():
++    import tyjokr_a11y_plus_build as build
++    return build.open_menu()
++
++
++def install():
++    global _build, _coordinates
++    import tyjokr_a11y_plus_build as build
++    import tyjokr_a11y_plus_core as core
++    import tyjokr_a11y_build_coordinates as coordinates
++    if getattr(build, '_helper_integration_installed', False): return
++    _build, _coordinates = build, coordinates
++    build.set_floor = set_floor
++    # Roof tools registered Alt+B before the detached wrapper loaded. Resolve
++    # the final menu when invoked, so every later wrapper is included once.
++    current = core.HOTKEYS.get(ord('B'))
++    if current is not None:
++        core.HOTKEYS[ord('B')] = (_build_menu, current[1])
++    build._helper_integration_installed = True
++    _log('installed')
 diff --git a/contrib-reference/modules/tyjokr_a11y_contrib.py b/contrib-reference/modules/tyjokr_a11y_contrib.py
-index be41ec4..b3190b7 100644
+index be41ec4..7fec914 100644
 --- a/contrib-reference/modules/tyjokr_a11y_contrib.py
 +++ b/contrib-reference/modules/tyjokr_a11y_contrib.py
-@@ -459,6 +459,11 @@ def install():
+@@ -459,6 +459,16 @@ def install():
          import tyjokr_a11y_detached
      except Exception as ex:
          _log("detached structure planner did not load: {!r}".format(ex))
@@ -342,9 +492,63 @@ index be41ec4..b3190b7 100644
 +        tyjokr_a11y_build_coordinates.install()
 +    except Exception as ex:
 +        _log("measured build coordinates did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_build_helpers
++        tyjokr_a11y_build_helpers.install()
++    except Exception as ex:
++        _log("build helper integration did not load: {!r}".format(ex))
      _log("narrow contribution layer installed")
  
  
+diff --git a/docs/development/audits/requested-ui-2026-11-09.md b/docs/development/audits/requested-ui-2026-11-09.md
+new file mode 100644
+index 0000000..cf86cdc
+--- /dev/null
++++ b/docs/development/audits/requested-ui-2026-11-09.md
+@@ -0,0 +1,29 @@
++# Requested UI audit — 2026-11-09
++
++Read-only audit of game 1.129.39.1030. Native UI.package SHA256: 6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83. Extracted current SocialMedia, SituationCreation, SituationDisplay, ChallengeEventDisplay, Dialog, Book, SimCamera and CameraControl. No fixes to these screens applied.
++
++## Social Bunny — confirmed traversal gap
++
++Native SocialMediaFriendCellView contains btnSendMessage and btnRemoveFriend; feed rows contain btnReaction and conditionally btnAddFriend. Their native handlers use PushButtonEvent.CLICK. Current A11yCollectFocusables stops at these CellView wrappers because A11yCompositeRow does not recognize them. An offline fixture executing production traversal reproduces the inaccessible child actions for friend, feed and message rows. Keep one readable post/contact stop, then expose its visible native child actions with localized tooltips and the associated Sim/post context. Do not assign a guessed default action to the wrapper.
++
++Evidence: build/requested-ui-audit/SocialMedia; build/audit_requested_ui_navigation.js. Source-derived fixture, not in-game confirmation.
++
++## Event goals — native information available; menu coverage missing
++
++SituationDisplay's SituationGoalCellView/GoalIconContainer contain localized goal names, progression text and native goal tooltips. Current accessibility Events menu in tyjokr_a11y_hub.py offers ending/leaving actions but no goal reader. A read-only Goals entry for the selected current event is a concrete extension; it must follow native active goal data and discard stale goals at event/zone changes. Automatic goal announcements need separate deduplication and opt-in consideration.
++
++## Wedding venue selection — cause not yet established
++
++Native LocationCellView is already a Button with venue/lot/neighborhood text. LocationListView uses selectable-group SELECTION_CHANGED, native expanded-world lists and eligibility filtering. Existing mod has role-slot and wizard navigation support. Static inspection does not prove venue selection itself is broken. Check expanded-list traversal, native selection acknowledgement and disabled/rejection state before proposing an activation change. Never bypass venue eligibility or trigger event creation while auditing.
++
++## Book title/description confirmation — cause not yet established
++
++Native text-input headers synchronize their model on Event.CHANGE and emit VALID/INVALID after ValidateValue. The mod deliberately passes typing and Enter to the native editor while editing; Enter may insert a newline. The current close-button exclusion targets btnClose, not confirmation. Cannot establish from static code whether the reported failure is an unreachable response, a disabled response or text validation. A focused read-only UI capture should record the actual text-input header, response controls and validation state; do not force-enable or auto-submit the dialog.
++
++## Photography — native shutter exists; missing labels not yet proven
++
++SimCameraMain.btnCamera has TAKE_PICTURE tooltip and OnCameraClicked routes through PhotographyTakePhoto. Therefore missing shutter access is not an absent native API. CameraFilterCellView receives its localized tooltipLocKey outside console-input mode and intentionally disables the selected filter. Current generic checkbox-state logic does not identify these filters as selected. Check modal/scope ownership, native input mode, selected-filter narration and viewport pruning before changing focus. Preserve filters_disabled, camera-quality, photo-count and native shutter validation. No photos taken during audit.
++
++## Next validation
++
++Use the existing read-only UI inspector on the affected screen when a reproducible session is available. Keep uncertain book, venue and shutter causes scoped separately. Social Bunny child-action traversal is the strongest offline-confirmed repair candidate.
+diff --git a/docs/development/changes/build-helper-integration.md b/docs/development/changes/build-helper-integration.md
+new file mode 100644
+index 0000000..ccb182a
+--- /dev/null
++++ b/docs/development/changes/build-helper-integration.md
+@@ -0,0 +1,8 @@
++# Build helper integration
++
++- `Scripts/tyjokr_a11y_build_helpers.py`: release native grid key ownership for a floor change, confirm the ordered UI round trip and owner release, inject one native floor key at a time with focus/context/modifier checks, verify the reported floor and restore ownership in `finally`. Grid tile, facing, height and enabled state are preserved.
++- Alt+B resolves the current `build.open_menu` at invocation, retaining the detached-structure wrapper installed after roof tools.
++- `contrib-reference/modules/tyjokr_a11y_contrib.py`: install the separate helper adapter after measured coordinates.
++- `tools/test_build_helpers.py`: key ownership/acknowledgement, multiple floors, abort/release paths, unchanged floor, invalid input and late menu wrappers.
++
++Live evidence: 2026-11-09 23:22, the game verified all five ground-floor room footprints. The three upper-floor attempts were intercepted as Build-grid floor-up commands; native construction stopped with incomplete second-floor rooms. The new adapter addresses input ownership; in-game verification pending.
 diff --git a/docs/development/changes/graphics-option-labels.md b/docs/development/changes/graphics-option-labels.md
 new file mode 100644
 index 0000000..48f9ce1
@@ -379,175 +583,6 @@ index 0000000..a3f9870
 +Live sequence: in Build Mode enable logging, run `a11y.buildcoords 5`, close the console, wait up to eight seconds. Inspect `build coordinates: preflight` and `measure` before testing a helper against a backed-up save. Compare planned and game-created room footprints. Read-only projection alone does not prove actual drawing succeeded.
 +
 +Rollback: restore the previous paired script/UI packages or reverse the source patch and remove the coordinate module/loader hook.
-diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
-index 2bc9cbf..644b81d 100644
---- a/flash/TooltipManager_patched.as
-+++ b/flash/TooltipManager_patched.as
-@@ -302,6 +302,97 @@ package olympus.core
-          catch(e:Error) { this.A11yBuildUnbind(); this.A11yBuildReply(serial,"aimfailed"); }
-       }
- 
-+      // Independent read-only projection. Never enables/moves a cursor or
-+      // confirms a tool; the Python coordinate adapter owns the response.
-+      protected var mA11yCoordinateMarker:Sprite = null;
-+      protected var mA11yCoordinateSerial:int = 0;
-+      protected var mA11yCoordinateZone:String = "";
-+      protected var mA11yCoordinateUntil:int = 0;
-+      protected var mA11yCoordinateFrames:int = 0;
-+
-+      public function A11yCoordinateCancel() : void
-+      {
-+         var marker:Sprite = this.mA11yCoordinateMarker;
-+         this.mA11yCoordinateMarker = null;
-+         try
-+         {
-+            if(marker != null)
-+            {
-+               marker.removeEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame);
-+               CommunicationManager.CallGameService("UnbindDisplayObject",{"displayObject":marker});
-+            }
-+         }
-+         catch(e:Error) { }
-+         try { if(marker != null && marker.parent != null) { marker.parent.removeChild(marker); } }
-+         catch(removeError:Error) { }
-+      }
-+
-+      public function A11yCoordinateReply(result:String, point:Point = null) : void
-+      {
-+         var serial:int = this.mA11yCoordinateSerial;
-+         var zone:String = this.mA11yCoordinateZone;
-+         try
-+         {
-+            var stage:Stage = this.mTooltipsLayer.stage;
-+            var layout:Object = getDefinitionByName("olympus.gamepad.LayoutAPI");
-+            var bounds:Rectangle = this.A11yBuildBounds();
-+            this.A11yPostToPython("a11y.coords_enc",encodeURIComponent([
-+               serial,zone,result,point != null ? point.x : "NaN",point != null ? point.y : "NaN",
-+               stage.stageWidth,stage.stageHeight,stage.scaleMode,stage.align,
-+               Number(layout["StageWidth"]),Number(layout["StageHeight"]),
-+               bounds != null ? bounds.left : 0,bounds != null ? bounds.top : 0,
-+               bounds != null ? bounds.right : 0,bounds != null ? bounds.bottom : 0].join("|")));
-+         }
-+         catch(e:Error) { }
-+         this.A11yCoordinateCancel();
-+      }
-+
-+      public function A11yCoordinateProbe(parts:Array) : void
-+      {
-+         if(parts.length != 8) { return; }
-+         if(this.mA11yCoordinateMarker != null) { this.A11yCoordinateReply("cancelled"); }
-+         this.mA11yCoordinateSerial = int(parts[2]);
-+         this.mA11yCoordinateZone = String(parts[7]);
-+         try
-+         {
-+            var x:Number = Number(parts[3]);
-+            var y:Number = Number(parts[4]);
-+            var z:Number = Number(parts[5]);
-+            var level:Number = Number(parts[6]);
-+            if(this.mA11yCoordinateSerial <= 0 || !isFinite(x) || !isFinite(y) || !isFinite(z) || !isFinite(level) || int(level) != level || Math.abs(x) > 100000 || Math.abs(y) > 100000 || Math.abs(z) > 100000) { return; }
-+            if(!this.mA11yBuildControls || !this.mA11yKeyboard || this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || getTimer() > this.mA11yKeyboardLease) { this.A11yCoordinateReply("blocked"); return; }
-+            if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("zonechanged"); return; }
-+            var marker:Sprite = new Sprite();
-+            marker.name = "A11yCoordinateProbe";
-+            marker.mouseEnabled = false;
-+            marker.mouseChildren = false;
-+            marker.alpha = 0;
-+            marker.x = -1000000;
-+            marker.y = -1000000;
-+            this.mA11yCoordinateMarker = marker;
-+            this.mA11yCoordinateUntil = getTimer() + 1500;
-+            this.mA11yCoordinateFrames = 0;
-+            this.mTooltipsLayer.addChild(marker);
-+            marker.addEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame,false,0,true);
-+            CommunicationManager.CallGameService("BindDisplayObject",{"displayObject":marker,"worldOffset":{"x":x,"y":y,"z":z},"screenOffset":{"x":0,"y":0}});
-+         }
-+         catch(e:Error) { this.A11yCoordinateReply("error"); }
-+      }
-+
-+      public function A11yCoordinateFrame(event:Event) : void
-+      {
-+         try
-+         {
-+            if(this.mA11yCoordinateMarker == null) { return; }
-+            this.mA11yCoordinateFrames = this.mA11yCoordinateFrames + 1;
-+            if(this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || !this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("blocked"); return; }
-+            var point:Point = this.mA11yCoordinateMarker.localToGlobal(new Point(0,0));
-+            if(this.mA11yCoordinateMarker.visible && isFinite(point.x) && isFinite(point.y) && Math.abs(point.x) < 999999 && Math.abs(point.y) < 999999) { this.A11yCoordinateReply("point",point); return; }
-+            if(getTimer() > this.mA11yCoordinateUntil || this.mA11yCoordinateFrames >= 90) { this.A11yCoordinateReply("viewport"); }
-+         }
-+         catch(e:Error) { this.A11yCoordinateReply("error"); }
-+      }
-+
-       public function A11yBuildProjectionFrame() : void
-       {
-          var point:Point = null;
-@@ -4007,6 +4098,7 @@ package olympus.core
-          }
-          if(_loc2_[1] == "buildhand" && _loc2_.length == 4 && _loc2_[2] == "drop") { this.A11yBuildHandDrop(String(_loc2_[3])); return; }
-          if(_loc2_[1] == "buildaim" && _loc2_.length == 8) { this.A11yBuildAim(_loc2_); return; }
-+         if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }
-          if(_loc2_[1] == "build" && _loc2_.length == 4) { this.A11yBuildCommand(String(_loc2_[2]),int(_loc2_[3])); return; }
-          if(_loc2_[1] == "plus" && _loc2_.length >= 3) { this.A11yPlusHandle(_loc2_); return; }
-          if(_loc2_[1] == "keyup") { delete this.mA11yGuardHeld[int(_loc2_[2])]; return; }
-@@ -6118,8 +6210,49 @@ package olympus.core
-          return null;
-       }
- 
-+      public function A11yGraphicsRowLabel(item:DisplayObject, result:Array) : void
-+      {
-+         var node:DisplayObject = item;
-+         var depth:int = 0;
-+         var name:String = "";
-+         var suffix:String = "";
-+         var control:DisplayObject = null;
-+         var label:DisplayObject = null;
-+         var text:String = "";
-+         var fields:Array = ["DisplayType","Resolution","RefreshRate","SceneRes","SimQuality","ObjQuality","LightingQuality","ReflectionQuality","EdgeSmooth","VisualEffect","ViewDistance","VisualQuality"];
-+         try
-+         {
-+            while(node != null && depth < 8)
-+            {
-+               name = getQualifiedClassName(node);
-+               if(name == "widgets.OptionsMenu.controls.tabs::DefaultGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::MacGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::GraphicsTab")
-+               {
-+                  for each(suffix in fields)
-+                  {
-+                     if(("dd" + suffix) in node && ("lb" + suffix) in node)
-+                     {
-+                        control = Object(node)["dd" + suffix] as DisplayObject;
-+                        label = Object(node)["lb" + suffix] as DisplayObject;
-+                        if(this.A11yIsLive(control) && this.A11yIsLive(label) && this.A11yIsInside(item,control))
-+                        {
-+                           text = this.A11yJoinedText(label);
-+                           if(text != null && text.length > 0) { result.unshift("-999998|0|" + text); }
-+                           return;
-+                        }
-+                     }
-+                  }
-+                  return;
-+               }
-+               node = node.parent;
-+               depth = depth + 1;
-+            }
-+         }
-+         catch(e:Error) { }
-+      }
-+
-       public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
-       {
-+         this.A11yGraphicsRowLabel(item,result);
-          var node:DisplayObject = item;
-          var depth:int = 0;
-          var label:Object = null;
-@@ -7737,7 +7870,7 @@ package olympus.core
-             {
-                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
-             }
--            if(_loc2_.indexOf("Checkbox") >= 0)
-+            if(_loc2_.indexOf("Checkbox") >= 0 || _loc2_ == "widgets.OptionsMenu::LeftLabelCheckBox")
-             {
-                _loc5_ = param1;
-                if(_loc5_.Selected == true)
 diff --git a/tools/test_build_coordinates.py b/tools/test_build_coordinates.py
 new file mode 100644
 index 0000000..c6314d5
@@ -719,6 +754,73 @@ index 0000000..c6314d5
 +  self.assertTrue(requests[0].startswith('A11y|coords|'));self.assertFalse(self.u.events);self.assertFalse(c._pending)
 + def test_park_does_not_move_an_unfocused_window(self):
 +  self.u.owner=0;c.park_mouse();self.assertFalse(self.u.events)
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_build_helpers.py b/tools/test_build_helpers.py
+new file mode 100644
+index 0000000..521fec5
+--- /dev/null
++++ b/tools/test_build_helpers.py
+@@ -0,0 +1,61 @@
++"""Native floor-key ownership and current Build-menu routing, without game input."""
++import contextlib,pathlib,sys,types,unittest
++from unittest.mock import Mock,patch
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_build_helpers as h
++class Tests(unittest.TestCase):
++ def setUp(self):
++  self.floor=0;self.events=[];self.released=False;self.geometry=(1,0,0,1920,1080,96);self.modifier=False;self.stall=False
++  self.state={'zone':1,'floor':0,'center':(10,20),'grid':True,'owner':True}
++  self.build=types.SimpleNamespace(current_floor=lambda:self.floor,on_main=lambda fn,*args:fn(*args))
++  self.u=types.SimpleNamespace(GetAsyncKeyState=lambda k:0x8000 if self.modifier and k==17 else 0,keybd_event=self.key)
++  @contextlib.contextmanager
++  def physical(u):
++   self.events.append('physical-on')
++   try:yield
++   finally:self.events.append('physical-restored')
++  def measure(*args):self.events.append('roundtrip');self.released=True
++  self.coords=types.SimpleNamespace(_api=lambda:self.u,physical_context=physical,window=lambda u:self.geometry,_measure=measure)
++  h._build,h._coordinates=self.build,self.coords
++  self.patches=[patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def key(self,key,scan,flags,extra):
++  self.events.append(('key',key,scan,flags))
++  if flags==3 and not self.stall:self.floor += 1 if key==33 else -1
++ def test_grid_releases_before_native_key_and_is_restored(self):
++  self.assertTrue(h.set_floor(1));self.assertEqual(self.floor,1)
++  self.assertLess(self.events.index('A11yBuildGridOff'),self.events.index('roundtrip'))
++  self.assertLess(self.events.index('roundtrip'),self.events.index(('key',33,0x49,1)))
++  self.assertEqual(self.events[-1],'restore-grid');self.assertIn('physical-restored',self.events)
++ def test_downward_and_multiple_levels_follow_native_report(self):
++  self.floor=2;self.state['floor']=2
++  self.assertTrue(h.set_floor(-1));self.assertEqual(self.floor,-1)
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),3)
++ def test_already_on_floor_emits_no_input_or_grid_messages(self):
++  self.assertTrue(h.set_floor(0));self.assertEqual(self.events,[])
++ def test_inactive_grid_is_not_reenabled(self):
++  self.state.update(grid=False,owner=False);self.released=True
++  self.assertTrue(h.set_floor(1));self.assertNotIn('restore-grid',self.events);self.assertNotIn('A11yBuildGridOff',self.events)
++ def test_no_key_before_native_ack(self):
++  self.coords._measure=lambda *a:self.events.append('roundtrip')
++  with patch.object(h.time,'monotonic',side_effect=[0,3]):self.assertFalse(h.set_floor(1))
++  self.assertFalse(any(isinstance(x,tuple) for x in self.events));self.assertIn('restore-grid',self.events)
++ def test_native_context_change_refuses_input(self):
++  h._same_world.return_value=False
++  self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
++ def test_modifier_keys_are_never_borrowed(self):
++  self.modifier=True;self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
++ def test_floor_boundary_stops_after_three_unchanged_attempts(self):
++  self.stall=True;self.assertFalse(h.set_floor(1))
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),3)
++ def test_key_up_survives_failure_after_key_down(self):
++  h.time.sleep.side_effect=RuntimeError('interrupted')
++  self.assertFalse(h.set_floor(1));self.assertIn(('key',33,0x49,3),self.events);self.assertIn('restore-grid',self.events)
++ def test_invalid_floor_requests_are_safe(self):
++  for value in [True,1.5,float('nan'),float('inf'),10**1000,'1',None]:self.assertFalse(h.set_floor(value))
++  self.assertEqual(self.events,[])
++ def test_alt_b_resolves_later_menu_wrappers(self):
++  build=types.SimpleNamespace(open_menu=Mock(return_value='detached'))
++  with patch.dict(sys.modules,tyjokr_a11y_plus_build=build):
++   self.assertEqual(h._build_menu(),'detached');build.open_menu=Mock(return_value='colors');self.assertEqual(h._build_menu(),'colors')
 +if __name__=='__main__':unittest.main()
 diff --git a/tools/test_coordinate_probe.js b/tools/test_coordinate_probe.js
 new file mode 100644
