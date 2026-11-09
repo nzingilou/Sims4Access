@@ -1,0 +1,26 @@
+{
+  "git_base": "f7a85d5e12570b489a9426452314d10383c26a08",
+  "patch_sha256": "ab3dd6cf1db23967b10f5c82bc6ce4a4e787e446a17d5e2a6ff5b7242bb7f0eb",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_display_diagnostic.py",
+      "before_sha256": null,
+      "after_sha256": "027bcaf78baaf226b785a622a876be3fbdf19b3fb3b33ae50da09a112b646cc3"
+    },
+    {
+      "path": "tools/test_display_diagnostic.py",
+      "before_sha256": null,
+      "after_sha256": "ade5c59d330086c99b32812ee13549fd13203eafb9b854f19ed36369e19f66f7"
+    },
+    {
+      "path": "docs/development/changes/display-diagnostic.md",
+      "before_sha256": null,
+      "after_sha256": "0565edb8de9ccf1d8ce0ccbc2614d842cc3a0421a46e141841b85c2ecca54bb5"
+    },
+    {
+      "path": "CHEATS.txt",
+      "before_sha256": "c8f467609e03fb79de7659d8980d36a96288737ec96d8c110a560b242af07505",
+      "after_sha256": "290e073ebf43670b3c24f2f32d18980b84f4f6d5718955507d17dceb2df7a448"
+    }
+  ]
+}

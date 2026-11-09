@@ -42,6 +42,7 @@ a11y.phonelist: Open the phone action list.
 a11y.phone: Open a waiting call or text.
 a11y.household: Choose an active Sim from your household.
 a11y.away: Choose a household Sim away from this lot and open their native portrait actions.
+a11y.inspect_display 5: Read-only display snapshot after five seconds; also enables passive builder projection/conversion diagnostics until restart. Enable a11y.log on, close the console and keep the game focused.
 a11y.contacts: Open known contacts.
 a11y.funds: Read household funds.
 a11y.scan rescan: Refresh the scanner.

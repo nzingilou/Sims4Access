@@ -1,0 +1,17 @@
+{
+  "git_base": "f7a85d5e12570b489a9426452314d10383c26a08",
+  "python": "3.7.9",
+  "base_script_sha256": "1c828606fe5a297bfd971bb2b8c2ad3432ff84c7e09ae27de33ccebcc5447560",
+  "changed_entries": [],
+  "added_entries": [
+    "tyjokr_a11y_display_diagnostic.pyc"
+  ],
+  "unchanged_entries": 60,
+  "installed_planner_has_source_coordinate_overrides": false,
+  "regression_suites": 116,
+  "reported_checks": 1577,
+  "status": "offline validated diagnostic; in-game measurement pending",
+  "files": {
+    "TS4_Access.ts4script": "20615b1db277b43fad04cd6501632cda9b9bbadaadae318f7064e47d408e30db"
+  }
+}

@@ -1,0 +1,361 @@
+diff --git a/CHEATS.txt b/CHEATS.txt
+index 246a6f0..e274f39 100644
+--- a/CHEATS.txt
++++ b/CHEATS.txt
+@@ -42,6 +42,7 @@ a11y.phonelist: Open the phone action list.
+ a11y.phone: Open a waiting call or text.
+ a11y.household: Choose an active Sim from your household.
+ a11y.away: Choose a household Sim away from this lot and open their native portrait actions.
++a11y.inspect_display 5: Read-only display snapshot after five seconds; also enables passive builder projection/conversion diagnostics until restart. Enable a11y.log on, close the console and keep the game focused.
+ a11y.contacts: Open known contacts.
+ a11y.funds: Read household funds.
+ a11y.scan rescan: Refresh the scanner.
+diff --git a/Scripts/tyjokr_a11y_display_diagnostic.py b/Scripts/tyjokr_a11y_display_diagnostic.py
+new file mode 100644
+index 0000000..a6fdf16
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_display_diagnostic.py
+@@ -0,0 +1,217 @@
++"""Read-only Windows/build coordinate diagnostics; never inject input or set DPI."""
++import ctypes
++import json
++import math
++import os
++import threading
++import time
++import sims4.commands
++import tyjokr_a11y_speech as speech
++
++class POINT(ctypes.Structure):
++    _fields_ = [('x', ctypes.c_int32), ('y', ctypes.c_int32)]
++
++class RECT(ctypes.Structure):
++    _fields_ = [(n, ctypes.c_int32) for n in ('left', 'top', 'right', 'bottom')]
++
++_timer = None
++_window_start = 0.0
++_count = 0
++_lock = threading.Lock()
++
++
++def _api():
++    # Private function objects: do not overwrite prototypes cached by the
++    # existing mouse worker. HWND/context return values must be pointer-wide.
++    u = ctypes.WinDLL('user32', use_last_error=True)
++    ptr, integer = ctypes.c_void_p, ctypes.c_int32
++    signatures = {
++        'GetForegroundWindow': (ptr, []),
++        'GetWindowThreadProcessId': (ctypes.c_uint32, [ptr, ctypes.POINTER(ctypes.c_uint32)]),
++        'GetClientRect': (integer, [ptr, ctypes.POINTER(RECT)]),
++        'GetWindowRect': (integer, [ptr, ctypes.POINTER(RECT)]),
++        'ClientToScreen': (integer, [ptr, ctypes.POINTER(POINT)]),
++        'ScreenToClient': (integer, [ptr, ctypes.POINTER(POINT)]),
++        'GetCursorPos': (integer, [ctypes.POINTER(POINT)]),
++        'GetPhysicalCursorPos': (integer, [ctypes.POINTER(POINT)]),
++        'LogicalToPhysicalPointForPerMonitorDPI': (integer, [ptr, ctypes.POINTER(POINT)]),
++        'GetDpiForWindow': (ctypes.c_uint32, [ptr]),
++        'GetThreadDpiAwarenessContext': (ptr, []),
++        'GetWindowDpiAwarenessContext': (ptr, [ptr]),
++        'GetAwarenessFromDpiAwarenessContext': (integer, [ptr]),
++        'GetSystemMetrics': (integer, [integer]),
++        'MonitorFromWindow': (ptr, [ptr, ctypes.c_uint32]),
++        'GetWindowLongPtrW': (ctypes.c_ssize_t, [ptr, integer]),
++        'IsZoomed': (integer, [ptr]),
++        'IsIconic': (integer, [ptr]),
++    }
++    for name, (result, args) in signatures.items():
++        fn = getattr(u, name, None)
++        if fn is not None:
++            fn.restype, fn.argtypes = result, args
++    return u
++
++
++def _monitor_scale(u, hwnd):
++    monitor = u.MonitorFromWindow(hwnd, 2)
++    if not monitor: raise RuntimeError('monitor unavailable')
++    lib = ctypes.WinDLL('shcore', use_last_error=True)
++    fn = lib.GetScaleFactorForMonitor
++    fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32)]
++    fn.restype = ctypes.c_int32
++    scale = ctypes.c_int32()
++    if fn(monitor, ctypes.byref(scale)) != 0: raise RuntimeError('scale unavailable')
++    return int(scale.value)
++
++
++def windows_snapshot(u=None):
++    u = _api() if u is None else u
++    hwnd = u.GetForegroundWindow()
++    owner = ctypes.c_uint32()
++    if not hwnd or not u.GetWindowThreadProcessId(hwnd, ctypes.byref(owner)) or owner.value != os.getpid():
++        return {'refused': 'foreground window is not owned by this game process'}
++    result = {'hwnd': int(hwnd), 'thread': threading.current_thread().name,
++              'game_ui_stage_size': None, 'errors': {}}
++    def field(name, fn):
++        try: result[name] = fn()
++        except Exception as exc: result['errors'][name] = type(exc).__name__
++    def rect(fn):
++        r = RECT()
++        if not fn(hwnd, ctypes.byref(r)): raise RuntimeError('rectangle query failed')
++        return [r.left, r.top, r.right, r.bottom]
++    def point(fn, initial=(0, 0), window=True):
++        p = POINT(*initial)
++        args = (hwnd, ctypes.byref(p)) if window else (ctypes.byref(p),)
++        if not fn(*args): raise RuntimeError('point query failed')
++        return [p.x, p.y]
++    field('client_rect_reported', lambda: rect(u.GetClientRect))
++    field('window_rect_reported', lambda: rect(u.GetWindowRect))
++    field('client_origin_reported', lambda: point(u.ClientToScreen))
++    field('cursor_reported', lambda: point(u.GetCursorPos, window=False))
++    field('cursor_physical', lambda: point(u.GetPhysicalCursorPos, window=False))
++    field('window_dpi', lambda: int(u.GetDpiForWindow(hwnd)))
++    field('monitor_scale_percent', lambda: _monitor_scale(u, hwnd))
++    field('window_style_hex', lambda: hex(u.GetWindowLongPtrW(hwnd, -16) & 0xffffffff))
++    field('maximized', lambda: bool(u.IsZoomed(hwnd)))
++    field('minimized', lambda: bool(u.IsIconic(hwnd)))
++    field('thread_awareness', lambda: int(u.GetAwarenessFromDpiAwarenessContext(u.GetThreadDpiAwarenessContext())))
++    field('window_awareness', lambda: int(u.GetAwarenessFromDpiAwarenessContext(u.GetWindowDpiAwarenessContext(hwnd))))
++    field('primary_size_reported', lambda: [u.GetSystemMetrics(0), u.GetSystemMetrics(1)])
++    field('virtual_desktop_reported', lambda: [u.GetSystemMetrics(i) for i in (76, 77, 78, 79)])
++    r = result.get('client_rect_reported')
++    if r:
++        w, h = r[2] - r[0], r[3] - r[1]
++        result['client_size_reported'] = [w, h]
++        samples = []
++        for initial in ((0, 0), (w // 2, h // 2), (max(0,w-1), max(0,h-1))):
++            sample = {'client': list(initial)}
++            try:
++                screen = point(u.ClientToScreen, initial)
++                sample.update(screen_reported=screen, client_roundtrip=point(u.ScreenToClient, screen))
++                sample['screen_physical_for_window'] = point(u.LogicalToPhysicalPointForPerMonitorDPI, screen)
++            except Exception as exc: sample['error'] = type(exc).__name__
++            samples.append(sample)
++        result['samples'] = samples
++    if u.GetForegroundWindow() != hwnd:
++        return {'refused': 'foreground changed during capture'}
++    return result
++
++
++def saved_options():
++    # Read only display fields, with a size cap; never include unrelated
++    # preferences, paths or personal data from Options.ini in the log.
++    result = {}
++    try:
++        folder = os.path.dirname(speech.LOG_PATH)
++        for _ in range(3):
++            if os.path.basename(folder).lower() == 'mods':
++                root = os.path.dirname(folder)
++                break
++            folder = os.path.dirname(folder)
++        else:
++            raise ValueError('Mods root unavailable')
++        with open(os.path.join(root, 'Options.ini'), 'r', encoding='utf-8-sig') as f:
++            text = f.read(65536)
++        keys = {'resolutionwidth','resolutionheight','resolutionrefresh','fullscreen','windowedfullscreen','uiscale','sceneresolution'}
++        for line in text.splitlines():
++            key, sep, value = line.partition('=')
++            if sep and key.strip().lower() in keys:
++                result[key.strip().lower()] = int(value.strip())
++    except Exception as exc: result['error'] = type(exc).__name__
++    return result
++
++
++def record(kind, data=None, build=None):
++    global _window_start, _count
++    if not speech.log_enabled: return False
++    with _lock:
++        now = time.monotonic()
++        if now - _window_start >= 60: _window_start, _count = now, 0
++        if _count >= 30: return False
++        _count += 1
++    try:
++        row = windows_snapshot()
++        row.update(kind=kind, data=data, saved_options=saved_options())
++        if build is not None and 'refused' not in row:
++            try: row['adapter_size_reported'] = list(build._stage_size())
++            except Exception as exc: row['errors']['adapter_size_reported'] = type(exc).__name__
++        speech.log_line('display inspect: ' + json.dumps(row, sort_keys=True, default=str))
++        return 'refused' not in row
++    except Exception as exc:
++        speech.log_line('display inspect: capture failed ' + type(exc).__name__)
++        return False
++
++
++def install(build):
++    if getattr(build, '_display_diagnostic_installed', False): return
++    original_project, original_convert = build.project, build._to_screen
++    def observe(kind, data):
++        try: record(kind, data, build)
++        except Exception: pass  # Optional logging must never break a build.
++    def project(*args, **kwargs):
++        try: result = original_project(*args, **kwargs)
++        except Exception as exc:
++            observe('project-error', {'error': type(exc).__name__, 'world_args': args})
++            raise
++        observe('project', {'world_args': args, 'world_kwargs': kwargs, 'reported_game_point': result})
++        return result
++    def convert(*args, **kwargs):
++        try: result = original_convert(*args, **kwargs)
++        except Exception as exc:
++            observe('convert-error', {'error': type(exc).__name__, 'input': args})
++            raise
++        observe('convert', {'input': args, 'output': result})
++        return result
++    build.project, build._to_screen = project, convert
++    build._display_diagnostic_installed = True
++
++
++@sims4.commands.Command('a11y.inspect_display', command_type=sims4.commands.CommandType.Live)
++def inspect_display(delay: float = 5, _connection=None):
++    global _timer
++    output = sims4.commands.CheatOutput(_connection)
++    if not math.isfinite(delay): return False
++    if not speech.log_enabled:
++        output('Run a11y.log on first.'); return False
++    try:
++        import tyjokr_a11y_plus_build as build
++        install(build)
++    except Exception as exc:
++        speech.log_line('display inspect: adapter unavailable ' + type(exc).__name__)
++        output('Display diagnostic unavailable; see TS4 Access log.')
++        return False
++    if _timer is not None: _timer.cancel()
++    delay = max(0, min(30, delay))
++    def capture():
++        try:
++            record('manual', build=build)
++        except Exception as exc:
++            speech.log_line('display inspect: manual capture failed ' + type(exc).__name__)
++    # No game APIs on this timer: only Win32/filesystem reads. Actual builder
++    # worker DPI/coordinates are captured by the passive wrappers separately.
++    _timer = threading.Timer(delay, capture)
++    _timer.daemon = True
++    _timer.name = 'a11y_display_probe'
++    _timer.start()
++    output('Read-only display snapshot in {} seconds. Close the console and keep the game focused; see TS4 Access log.'.format(delay))
++    return True
+diff --git a/docs/development/changes/display-diagnostic.md b/docs/development/changes/display-diagnostic.md
+new file mode 100644
+index 0000000..2a95fcb
+--- /dev/null
++++ b/docs/development/changes/display-diagnostic.md
+@@ -0,0 +1,15 @@
++# Build display diagnostic adapter
++
++- `Scripts/tyjokr_a11y_display_diagnostic.py`: `a11y.inspect_display [delay]` (default 5, clamped 0..30 seconds); process-scoped Win32 measurements, saved display-option whitelist and capped JSON logging under `display inspect:`. Records reported/physical cursor coordinates, client/screen round trips, window/thread DPI awareness, monitor scale, window style and desktop metrics. No input injection, DPI changes or settings writes.
++- The console command enables passive wrappers on the currently installed build module. Wrappers preserve project/conversion arguments, exceptions and return values, and measure on their actual calling worker. Diagnostic failures cannot interrupt a build. No planner module replacement is needed.
++- `tools/test_display_diagnostic.py`: scaled/offset coordinates, process/focus guards, optional API failures, private pointer-width bindings, rate cap, options privacy, transparent wrappers and no-action delayed command. CHEATS.txt: command instructions.
++
++The game UI-stage dimensions remain explicitly null: client pixels, saved rendering resolution, UI scale and stage units must not be treated as interchangeable. The diagnostic command does not request a game projection or enable/move either cursor. An existing user-initiated build operation supplies passive projection/conversion records.
++
++API references: [Microsoft DPI conversion](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-logicaltophysicalpointforpermonitordpi), [GetScaleFactorForMonitor](https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getscalefactorformonitor). Physical-point conversion is tied to the supplied window's awareness; both thread/window contexts are recorded for interpretation.
++
++Live capture: enable logging, enter Build Mode, run `a11y.inspect_display 5`, close the console and keep the game focused for five seconds. Compare with passive records from the builder worker before choosing a conversion correction. A manual snapshot by itself does not validate projection units.
++
++The installed planner was compared with the checkout: the installed module lacks the source's `_client_size` / `_client_to_screen` overrides. This diagnostic preserves that installed implementation for measurement.
++
++Rollback: restore the previous script archive, or remove the diagnostic module and its cheat documentation. Disabling logging stops passive observations; wrappers are reset on game restart.
+diff --git a/tools/test_display_diagnostic.py b/tools/test_display_diagnostic.py
+new file mode 100644
+index 0000000..08a5686
+--- /dev/null
++++ b/tools/test_display_diagnostic.py
+@@ -0,0 +1,99 @@
++"""Read-only, process-scoped display observations and transparent adapters."""
++import importlib.util,json,os,pathlib,sys,tempfile,types,unittest
++from unittest.mock import Mock,patch
++ROOT=pathlib.Path(__file__).resolve().parents[1]
++speech=types.SimpleNamespace(log_enabled=True,log_line=Mock(),LOG_PATH='')
++commands=types.SimpleNamespace(Command=lambda *a,**k:lambda f:f,CommandType=types.SimpleNamespace(Live=1),CheatOutput=lambda c:lambda s:None)
++sys.modules.update(tyjokr_a11y_speech=speech,sims4=types.SimpleNamespace(commands=commands))
++sys.modules['sims4.commands']=commands
++spec=importlib.util.spec_from_file_location('display',str(ROOT/'Scripts/tyjokr_a11y_display_diagnostic.py'))
++d=importlib.util.module_from_spec(spec);spec.loader.exec_module(d)
++class API:
++ def GetForegroundWindow(self):return 2**40
++ def GetWindowThreadProcessId(self,h,p):p._obj.value=os.getpid();return 1
++ def GetClientRect(self,h,p):p._obj.left=p._obj.top=0;p._obj.right=1440;p._obj.bottom=900;return 1
++ def GetWindowRect(self,h,p):return self.GetClientRect(h,p)
++ def ClientToScreen(self,h,p):p._obj.x+=120;p._obj.y+=80;return 1
++ def ScreenToClient(self,h,p):p._obj.x-=120;p._obj.y-=80;return 1
++ def LogicalToPhysicalPointForPerMonitorDPI(self,h,p):p._obj.x*=2;p._obj.y*=2;return 1
++ def GetCursorPos(self,p):p._obj.x=100;p._obj.y=200;return 1
++ def GetPhysicalCursorPos(self,p):p._obj.x=200;p._obj.y=400;return 1
++ def GetDpiForWindow(self,h):return 192
++ def GetThreadDpiAwarenessContext(self):return 1
++ def GetWindowDpiAwarenessContext(self,h):return 2
++ def GetAwarenessFromDpiAwarenessContext(self,c):return c
++ def GetSystemMetrics(self,n):return {0:1440,1:900,76:-100,77:0,78:2880,79:900}[n]
++class Tests(unittest.TestCase):
++ def setUp(self):
++  speech.log_enabled=True;speech.log_line.reset_mock();d._window_start=0;d._count=0
++ def snapshot(self,u=None):
++  with patch.object(d,'_monitor_scale',return_value=200):return d.windows_snapshot(u or API())
++ def test_scaled_offset_client_and_roundtrip(self):
++  r=self.snapshot();self.assertEqual(r['hwnd'],2**40)
++  self.assertEqual(r['client_size_reported'],[1440,900]);self.assertEqual(r['monitor_scale_percent'],200)
++  self.assertEqual(r['samples'][1],{'client':[720,450],'screen_reported':[840,530],
++   'client_roundtrip':[720,450],'screen_physical_for_window':[1680,1060]})
++  self.assertIsNone(r['game_ui_stage_size'])
++ def test_dpi_context_and_cursor_units_are_separate(self):
++  r=self.snapshot();self.assertEqual((r['thread_awareness'],r['window_awareness']),(1,2))
++  self.assertEqual(r['cursor_reported'],[100,200]);self.assertEqual(r['cursor_physical'],[200,400])
++ def test_non_game_foreground_refused_before_reading_metrics(self):
++  u=API();u.GetWindowThreadProcessId=lambda h,p:1;u.GetClientRect=Mock()
++  self.assertIn('refused',self.snapshot(u));u.GetClientRect.assert_not_called()
++ def test_foreground_change_invalidates_snapshot(self):
++  u=API();u.GetForegroundWindow=Mock(side_effect=[2**40,9]);self.assertIn('refused',self.snapshot(u))
++ def test_optional_apis_and_failed_reads_are_explicit(self):
++  u=API();u.GetDpiForWindow=Mock(side_effect=AttributeError);u.GetClientRect=lambda *a:0
++  r=self.snapshot(u);self.assertIn('client_rect_reported',r['errors']);self.assertIn('window_dpi',r['errors'])
++ def test_options_whitelist_and_no_write(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=pathlib.Path(td);p=root/'Options.ini';p.write_text('fullscreen=1\nuiscale=100\nprivate_setting=secret\n')
++   speech.LOG_PATH=str(root/'Mods/TS4_Access/TS4_Access.log');before=p.read_bytes()
++   self.assertEqual(d.saved_options(),{'fullscreen':1,'uiscale':100});self.assertEqual(p.read_bytes(),before)
++ def test_logging_off_never_queries_windows(self):
++  speech.log_enabled=False
++  with patch.object(d,'windows_snapshot') as read:self.assertFalse(d.record('test'));read.assert_not_called()
++ def test_options_also_supports_script_at_mods_root(self):
++  with tempfile.TemporaryDirectory() as td:
++   root=pathlib.Path(td);(root/'Options.ini').write_text('fullscreen=0\n')
++   speech.LOG_PATH=str(root/'Mods/TS4_Access.log')
++   self.assertEqual(d.saved_options(),{'fullscreen':0})
++ def test_options_does_not_search_unrelated_ancestors(self):
++  speech.LOG_PATH='C:/unrelated/project/log.txt'
++  self.assertEqual(d.saved_options(),{'error':'ValueError'})
++ def test_rate_limit_caps_snapshots(self):
++  with patch.object(d,'windows_snapshot',return_value={'errors':{}}) as read,patch.object(d,'saved_options',return_value={}):
++   for _ in range(40):d.record('test')
++   self.assertEqual(read.call_count,30)
++ def test_wrappers_preserve_return_values_and_call_counts(self):
++  b=types.SimpleNamespace(project=Mock(return_value=(1,2)),_to_screen=Mock(return_value=(3,4)),_stage_size=lambda:(1440,900))
++  project,convert=b.project,b._to_screen
++  with patch.object(d,'record') as record:
++   d.install(b);wrapped=b.project;d.install(b);self.assertIs(b.project,wrapped)
++   self.assertEqual(b.project(5,6,1),(1,2));self.assertEqual(b._to_screen(1,2),(3,4))
++   project.assert_called_once_with(5,6,1);convert.assert_called_once_with(1,2);self.assertEqual(record.call_count,2)
++ def test_wrappers_preserve_original_exceptions(self):
++  b=types.SimpleNamespace(project=Mock(side_effect=ValueError('native')), _to_screen=Mock())
++  d.install(b)
++  with self.assertRaises(ValueError):b.project(1,2,0)
++ def test_diagnostic_failure_cannot_change_build_results_or_errors(self):
++  b=types.SimpleNamespace(project=Mock(return_value=(1,2)),_to_screen=Mock(side_effect=ValueError('original')))
++  d.install(b)
++  with patch.object(d,'record',side_effect=RuntimeError('diagnostic')):
++   self.assertEqual(b.project(1,2,0),(1,2))
++   with self.assertRaisesRegex(ValueError,'original'):b._to_screen(1,2)
++ def test_manual_command_uses_delayed_worker_and_no_build_action(self):
++  timer=Mock();b=types.SimpleNamespace(_stage_size=lambda:(1,1),project=Mock(),_to_screen=Mock())
++  project,convert=b.project,b._to_screen
++  with patch.object(d.threading,'Timer',return_value=timer) as make,patch.dict(sys.modules,tyjokr_a11y_plus_build=b),patch.object(d,'record') as record:
++   self.assertTrue(d.inspect_display(5));self.assertEqual(make.call_args[0][0],5)
++   make.call_args[0][1]();record.assert_called_once_with('manual',build=b)
++   project.assert_not_called();convert.assert_not_called();self.assertTrue(b._display_diagnostic_installed)
++ def test_private_win32_pointer_signatures(self):
++  api=d._api();self.assertIs(api.GetForegroundWindow.restype,d.ctypes.c_void_p)
++  self.assertEqual(d.ctypes.sizeof(d.POINT),8);self.assertEqual(d.ctypes.sizeof(d.RECT),16)
++ def test_no_input_or_dpi_mutation_apis(self):
++  source=(ROOT/'Scripts/tyjokr_a11y_display_diagnostic.py').read_text()
++  for forbidden in ['SetCursorPos','SendInput','mouse_event','SetThreadDpiAwarenessContext','SetProcessDpiAwareness']:
++   self.assertNotIn(forbidden,source)
++if __name__=='__main__':unittest.main()
