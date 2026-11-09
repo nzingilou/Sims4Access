@@ -459,6 +459,11 @@ def install():
         import tyjokr_a11y_detached
     except Exception as ex:
         _log("detached structure planner did not load: {!r}".format(ex))
+    try:
+        import tyjokr_a11y_build_coordinates
+        tyjokr_a11y_build_coordinates.install()
+    except Exception as ex:
+        _log("measured build coordinates did not load: {!r}".format(ex))
     _log("narrow contribution layer installed")
 
 

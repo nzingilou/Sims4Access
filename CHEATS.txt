@@ -49,3 +49,5 @@ a11y.scan rescan: Refresh the scanner.
 
 Settings commands save your preferences. Updating the mod preserves your
 settings file; the release ZIP does not replace it.
+
+a11y.buildcoords 5: Read-only native projection and screen-mapping check. In Build Mode, close the console and wait eight seconds. Does not move the pointer or build.

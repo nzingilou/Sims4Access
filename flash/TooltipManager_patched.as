@@ -302,6 +302,97 @@ package olympus.core
          catch(e:Error) { this.A11yBuildUnbind(); this.A11yBuildReply(serial,"aimfailed"); }
       }
 
+      // Independent read-only projection. Never enables/moves a cursor or
+      // confirms a tool; the Python coordinate adapter owns the response.
+      protected var mA11yCoordinateMarker:Sprite = null;
+      protected var mA11yCoordinateSerial:int = 0;
+      protected var mA11yCoordinateZone:String = "";
+      protected var mA11yCoordinateUntil:int = 0;
+      protected var mA11yCoordinateFrames:int = 0;
+
+      public function A11yCoordinateCancel() : void
+      {
+         var marker:Sprite = this.mA11yCoordinateMarker;
+         this.mA11yCoordinateMarker = null;
+         try
+         {
+            if(marker != null)
+            {
+               marker.removeEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame);
+               CommunicationManager.CallGameService("UnbindDisplayObject",{"displayObject":marker});
+            }
+         }
+         catch(e:Error) { }
+         try { if(marker != null && marker.parent != null) { marker.parent.removeChild(marker); } }
+         catch(removeError:Error) { }
+      }
+
+      public function A11yCoordinateReply(result:String, point:Point = null) : void
+      {
+         var serial:int = this.mA11yCoordinateSerial;
+         var zone:String = this.mA11yCoordinateZone;
+         try
+         {
+            var stage:Stage = this.mTooltipsLayer.stage;
+            var layout:Object = getDefinitionByName("olympus.gamepad.LayoutAPI");
+            var bounds:Rectangle = this.A11yBuildBounds();
+            this.A11yPostToPython("a11y.coords_enc",encodeURIComponent([
+               serial,zone,result,point != null ? point.x : "NaN",point != null ? point.y : "NaN",
+               stage.stageWidth,stage.stageHeight,stage.scaleMode,stage.align,
+               Number(layout["StageWidth"]),Number(layout["StageHeight"]),
+               bounds != null ? bounds.left : 0,bounds != null ? bounds.top : 0,
+               bounds != null ? bounds.right : 0,bounds != null ? bounds.bottom : 0].join("|")));
+         }
+         catch(e:Error) { }
+         this.A11yCoordinateCancel();
+      }
+
+      public function A11yCoordinateProbe(parts:Array) : void
+      {
+         if(parts.length != 8) { return; }
+         if(this.mA11yCoordinateMarker != null) { this.A11yCoordinateReply("cancelled"); }
+         this.mA11yCoordinateSerial = int(parts[2]);
+         this.mA11yCoordinateZone = String(parts[7]);
+         try
+         {
+            var x:Number = Number(parts[3]);
+            var y:Number = Number(parts[4]);
+            var z:Number = Number(parts[5]);
+            var level:Number = Number(parts[6]);
+            if(this.mA11yCoordinateSerial <= 0 || !isFinite(x) || !isFinite(y) || !isFinite(z) || !isFinite(level) || int(level) != level || Math.abs(x) > 100000 || Math.abs(y) > 100000 || Math.abs(z) > 100000) { return; }
+            if(!this.mA11yBuildControls || !this.mA11yKeyboard || this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || getTimer() > this.mA11yKeyboardLease) { this.A11yCoordinateReply("blocked"); return; }
+            if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("zonechanged"); return; }
+            var marker:Sprite = new Sprite();
+            marker.name = "A11yCoordinateProbe";
+            marker.mouseEnabled = false;
+            marker.mouseChildren = false;
+            marker.alpha = 0;
+            marker.x = -1000000;
+            marker.y = -1000000;
+            this.mA11yCoordinateMarker = marker;
+            this.mA11yCoordinateUntil = getTimer() + 1500;
+            this.mA11yCoordinateFrames = 0;
+            this.mTooltipsLayer.addChild(marker);
+            marker.addEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame,false,0,true);
+            CommunicationManager.CallGameService("BindDisplayObject",{"displayObject":marker,"worldOffset":{"x":x,"y":y,"z":z},"screenOffset":{"x":0,"y":0}});
+         }
+         catch(e:Error) { this.A11yCoordinateReply("error"); }
+      }
+
+      public function A11yCoordinateFrame(event:Event) : void
+      {
+         try
+         {
+            if(this.mA11yCoordinateMarker == null) { return; }
+            this.mA11yCoordinateFrames = this.mA11yCoordinateFrames + 1;
+            if(this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || !this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("blocked"); return; }
+            var point:Point = this.mA11yCoordinateMarker.localToGlobal(new Point(0,0));
+            if(this.mA11yCoordinateMarker.visible && isFinite(point.x) && isFinite(point.y) && Math.abs(point.x) < 999999 && Math.abs(point.y) < 999999) { this.A11yCoordinateReply("point",point); return; }
+            if(getTimer() > this.mA11yCoordinateUntil || this.mA11yCoordinateFrames >= 90) { this.A11yCoordinateReply("viewport"); }
+         }
+         catch(e:Error) { this.A11yCoordinateReply("error"); }
+      }
+
       public function A11yBuildProjectionFrame() : void
       {
          var point:Point = null;
@@ -4007,6 +4098,7 @@ package olympus.core
          }
          if(_loc2_[1] == "buildhand" && _loc2_.length == 4 && _loc2_[2] == "drop") { this.A11yBuildHandDrop(String(_loc2_[3])); return; }
          if(_loc2_[1] == "buildaim" && _loc2_.length == 8) { this.A11yBuildAim(_loc2_); return; }
+         if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }
          if(_loc2_[1] == "build" && _loc2_.length == 4) { this.A11yBuildCommand(String(_loc2_[2]),int(_loc2_[3])); return; }
          if(_loc2_[1] == "plus" && _loc2_.length >= 3) { this.A11yPlusHandle(_loc2_); return; }
          if(_loc2_[1] == "keyup") { delete this.mA11yGuardHeld[int(_loc2_[2])]; return; }
