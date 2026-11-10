@@ -1153,6 +1153,11 @@ _TRANSLATIONS['scanner unavailable'] = {
 }
 
 
+_TRANSLATIONS['photography controls'] = {'en': 'Photography controls', 'de': 'Fotosteuerung'}
+_TRANSLATIONS['current event goals'] = {'en': 'Current event goals', 'de': 'Aktuelle Veranstaltungsziele'}
+_TRANSLATIONS['event goals unavailable'] = {'en': 'Goals are not available for this event right now.', 'de': 'Die Ziele dieser Veranstaltung sind gerade nicht verfügbar.'}
+
+
 def _detect_lang():
     """Language prefix from the connected client's account locale."""
     global _locale_lang

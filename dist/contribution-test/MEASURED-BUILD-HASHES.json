@@ -1,35 +1,37 @@
 {
-  "base_commit": "127ec613e8a430ee841cca54d617901f1409ea56",
-  "base_script_sha256": "20615b1db277b43fad04cd6501632cda9b9bbadaadae318f7064e47d408e30db",
+  "base_commit": "f227c15",
+  "base_script_sha256": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
+  "script_sha256": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
   "changed_entries": [
-    "tyjokr_a11y_contrib.pyc"
+    "tyjokr_a11y_hub.pyc",
+    "tyjokr_a11y_lang.pyc"
   ],
   "added_entries": [
-    "tyjokr_a11y_build_coordinates.pyc",
-    "tyjokr_a11y_build_helpers.pyc",
-    "tyjokr_a11y_basement.pyc",
-    "tyjokr_a11y_house_workflow.pyc"
+    "tyjokr_a11y_event_goals.pyc"
   ],
-  "unchanged_entries": 60,
-  "python": "3.7.9",
-  "script_sha256": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
-  "status": "candidate; native in-game validation pending",
+  "unchanged_entries": 63,
+  "in_game_validation": "pending",
   "files": {
-    "TS4_Access.ts4script": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
-    "TS4_Access_UI.package": "f5c0065abeb8fd3630d76fd9ef3c8784ac9cd5cd0779b06ff147305a1ebe877a",
-    "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
+    "TS4_Access.ts4script": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
+    "TS4_Access_Compatibility_UICheats.package": "9aee82b3627ffcd59da988489b8f3229ee4f64b4748069a3ef6c6174314ee944",
+    "TS4_Access_UI.package": "48f3cac0afbf9b5bf107ecb5c57341fee0816fab6f6df985f86522eead593a83"
   },
   "validation": {
-    "passed": false,
     "input_stable": true,
-    "passing_suites": 122,
-    "suites": 123,
-    "reported_checks": 1664,
-    "compiled_basement_checks": 24,
-    "compiled_house_workflow_checks": 22,
-    "installed_plan_functions_verified": 6,
-    "failure": "Unchanged PowerShell prelaunch helper timeout",
-    "ui": "unchanged bytes; prior fidelity gates retained",
-    "in_game": "Unified builder and fresh-floor verification installed; live basement and complete door/stair confirmation pending."
+    "passing_suites": 124,
+    "total_suites": 125,
+    "checks": 1697,
+    "failures": [
+      "tools/test_prelaunch_helper.py"
+    ],
+    "shared_copies": 29,
+    "methods_per_copy": 56,
+    "unchanged_routing_and_coordinate_methods": 41,
+    "standard_movies": 25,
+    "standard_fidelity_comparisons": 62,
+    "compatibility_movies": 6,
+    "compatibility_fidelity_comparisons": 19,
+    "class_sets_and_non_code_tags_preserved": true,
+    "in_game": "pending"
   }
 }

@@ -1,7 +1,6 @@
-# Build coordinate adapter
+# Changes
 
-- Measure native world projection and UI dimensions instead of assuming a screen resolution or multiplying by Windows scaling.
-- Map through the current game window, including window offsets and multiple monitors.
-- Stop pointer operations when focus, window geometry, DPI or Build Mode changes.
-- Add `a11y.buildcoords 5`, a read-only projection diagnostic.
-- Announce localized names for all twelve Graphics dropdowns and checked/unchecked for the native Graphics checkboxes.
+- Refresh native floor bounds and unify house presets/custom stacking in Build my house.
+- Expose Social Bunny actions, book-dialog input fields, and hidden card actions in clubs, Gallery subscriptions, rental units and households.
+- Add running event goal navigation and a route to an open photography screen.
+- Announce selected photo filters and wedding venues.

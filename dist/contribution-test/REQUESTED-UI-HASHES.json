@@ -1,0 +1,37 @@
+{
+  "base_commit": "f227c15",
+  "base_script_sha256": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
+  "script_sha256": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
+  "changed_entries": [
+    "tyjokr_a11y_hub.pyc",
+    "tyjokr_a11y_lang.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_event_goals.pyc"
+  ],
+  "unchanged_entries": 63,
+  "in_game_validation": "pending",
+  "files": {
+    "TS4_Access.ts4script": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
+    "TS4_Access_Compatibility_UICheats.package": "9aee82b3627ffcd59da988489b8f3229ee4f64b4748069a3ef6c6174314ee944",
+    "TS4_Access_UI.package": "48f3cac0afbf9b5bf107ecb5c57341fee0816fab6f6df985f86522eead593a83"
+  },
+  "validation": {
+    "input_stable": true,
+    "passing_suites": 124,
+    "total_suites": 125,
+    "checks": 1697,
+    "failures": [
+      "tools/test_prelaunch_helper.py"
+    ],
+    "shared_copies": 29,
+    "methods_per_copy": 56,
+    "unchanged_routing_and_coordinate_methods": 41,
+    "standard_movies": 25,
+    "standard_fidelity_comparisons": 62,
+    "compatibility_movies": 6,
+    "compatibility_fidelity_comparisons": 19,
+    "class_sets_and_non_code_tags_preserved": true,
+    "in_game": "pending"
+  }
+}

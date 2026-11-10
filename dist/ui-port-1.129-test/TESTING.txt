@@ -1,1 +1,5 @@
-In Build Mode, enable logging and enter a11y.buildcoords 5. Close the console and wait eight seconds. This diagnostic does not move the pointer or build. Then test a small house helper on a backed-up save. Install the script in Mods/TS4_Access and the standard UI there; install the UI Cheats compatibility package in Mods/_Overrides only when using UI Cheats. Keep the three files paired.
+With The Sims 4 closed: script and main UI go in Mods/TS4_Access; UI Cheats compatibility package goes in Mods/_Overrides only when using UI Cheats. Clear localthumbcache.package after replacing UI packages.
+
+Alt+B > Build my house: test a two-story preset, then custom stacking/basement on a backed-up save. Check actual rooms, doors and stairs.
+Accessibility menu > Events > selected running event > Current event goals. Panels > Photography controls: open camera first. Social Bunny cards expose native actions. Tab/Shift+Tab leaves book text fields for footer navigation. Wedding venues report selected state.
+Offline checks do not confirm live book, wedding, photography or final house placement behavior.

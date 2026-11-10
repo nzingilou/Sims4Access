@@ -1,126 +1,35 @@
 {
-  "git_base": "127ec613e8a430ee841cca54d617901f1409ea56",
-  "patch_sha256": "637f035a860b1f04dfb6b3621482eee0ff22210f61777399e8d24933a3ea6f22",
-  "files": [
-    {
-      "path": "CONTROLS.txt",
-      "before_sha256": "6a7b491644d8e97acef34838863ecd530dc2ea152c719e288126de633050bbec",
-      "after_sha256": "c4e18ef68186182a269b8bc6a77824a3c7ac2d721bb879ff1c37339f059a7a07"
-    },
-    {
-      "path": "Scripts/tyjokr_a11y_basement.py",
-      "before_sha256": null,
-      "after_sha256": "d5a4d1c9f6b0f050d9e1a5e6b7ebcea87d154cf0a1fcf703b52237345efe7901"
-    },
-    {
-      "path": "Scripts/tyjokr_a11y_build_coordinates.py",
-      "before_sha256": null,
-      "after_sha256": "91a34d5d32ca1e7c68b4c749c1f855cce3cb9b8b32e747a1c4d199bb7dac19f1"
-    },
-    {
-      "path": "Scripts/tyjokr_a11y_build_helpers.py",
-      "before_sha256": null,
-      "after_sha256": "c852206e9d0bbd3f4a7493762de67f5c25a61ebe33eafaa4b689326cf1c3362c"
-    },
-    {
-      "path": "Scripts/tyjokr_a11y_house_workflow.py",
-      "before_sha256": null,
-      "after_sha256": "06032c596810e6bfeaf917a628be0839593d996037a0153c36c4347720bd65f9"
-    },
-    {
-      "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
-      "before_sha256": "d5d85359e0e5a87e139db4093b179471b053ab8349d93a25b56181dbbd4c327e",
-      "after_sha256": "4e7fa0a27b9a89ecbd63dba84d7d7f4ad86b824e275ed2077de597587749ff73"
-    },
-    {
-      "path": "docs/development/audits/requested-ui-2026-11-09.md",
-      "before_sha256": null,
-      "after_sha256": "746848597ed2eaa6396cf8d29ebf9a277d7c8146010c315595ddff33ce2b316b"
-    },
-    {
-      "path": "docs/development/changes/basement-adapter.md",
-      "before_sha256": null,
-      "after_sha256": "8a7ddb9efcce442ed3a5fab24d3c4482e965a6ecb7c55cea492b9f37e8c959b6"
-    },
-    {
-      "path": "docs/development/changes/build-helper-integration.md",
-      "before_sha256": null,
-      "after_sha256": "45e8528650f9979a5a60e5365d5d68d055e5455a6b63c079cd89895b31bec55b"
-    },
-    {
-      "path": "docs/development/changes/graphics-option-labels.md",
-      "before_sha256": null,
-      "after_sha256": "ccf2406402093552ecdd10fb2a12a1507265681f66afc5e9bd7fd9140f152eba"
-    },
-    {
-      "path": "docs/development/changes/measured-build-coordinates.md",
-      "before_sha256": null,
-      "after_sha256": "58cf985993ccb529e4d038e0a5146cf70fe4f67d44090268f7b8d89805e98830"
-    },
-    {
-      "path": "docs/development/changes/native-floor-and-stair-isolation.md",
-      "before_sha256": null,
-      "after_sha256": "c3addfd94f3832712a784c7bffd653732cdf77e3cd01f2d32453faeaecfe677e"
-    },
-    {
-      "path": "docs/development/changes/unified-house-workflow.md",
-      "before_sha256": null,
-      "after_sha256": "b21b30334f141dbde19c911b5e9efcb1f65e00eebcaa64164df366a3c49ae6ab"
-    },
-    {
-      "path": "flash/TooltipManager_patched.as",
-      "before_sha256": "9653ba04fa5e51eb86e87d5531536903c4a025e3deaffcd25e8cf79955c15dcc",
-      "after_sha256": "b04df0fa3b9f30624739547ae44ffb72a437a9c2f54eab2db172d81696e8ed97"
-    },
-    {
-      "path": "flash/extra-classes/ControlPanel.as",
-      "before_sha256": "6db1f1208b3e2201e330700427e0e0f49c4d3f08eddfea4a6f720acfa5922ce3",
-      "after_sha256": "63a0aacf862c2de4aa30784a232be7d9e0700d00607f18ff50473500813a2186"
-    },
-    {
-      "path": "tools/test_basement_adapter.py",
-      "before_sha256": null,
-      "after_sha256": "e3f3ee60db0ec450b9d53d0298912bf2ee24ee1b3f8ef0b19c78fbac44667edd"
-    },
-    {
-      "path": "tools/test_build_coordinates.py",
-      "before_sha256": null,
-      "after_sha256": "51619f9aea904b136275853e51a75abf79f607b8af1a6568b3e91df3f6856392"
-    },
-    {
-      "path": "tools/test_build_helpers.py",
-      "before_sha256": null,
-      "after_sha256": "caad5ef4da1e6e7a9e14f4590375a834d267ab5c3ffec51292f25e0c6ca2ccac"
-    },
-    {
-      "path": "tools/test_coordinate_probe.js",
-      "before_sha256": null,
-      "after_sha256": "861fa7aead20e17a42f08ba9441291ff8419fa689ffc5b7f9ebc4a40d87f056d"
-    },
-    {
-      "path": "tools/test_event_activation_v13.js",
-      "before_sha256": "e93040777817b4643868f08c4c760d4bbe73c2f4ecfb15b166bb368fc1d05e0c",
-      "after_sha256": "f751431bdf67c7df59859383b80eece119d429ef2ba31d715e45f544046c2019"
-    },
-    {
-      "path": "tools/test_flash_navigation_v10.js",
-      "before_sha256": "ea3dbebe6dd5d71503e52f982cc840eabba8eaa25a31372f13624864c390013d",
-      "after_sha256": "697d318401f56fca07c76a16c491f37b8ed2c3fa49ea85f62eea66dfd3ab7922"
-    },
-    {
-      "path": "tools/test_house_workflow.py",
-      "before_sha256": null,
-      "after_sha256": "d6b129a6d03bcbcefc00fb79c298c1e90df9fc0495f91dd0ce0b39b783e0b343"
-    },
-    {
-      "path": "tools/test_native_floor_bridge.js",
-      "before_sha256": null,
-      "after_sha256": "8024ab1f41a9022aa852a796430ca61b78b648172f20c9baa48d49af3f62753d"
-    },
-    {
-      "path": "tools/test_options_simplified.js",
-      "before_sha256": "de113e81d082548f5eada79d3ec2dc5c3737c8a332c74d181415104fbd37d977",
-      "after_sha256": "69d7a941997a3bdb3df74587b87331848ccb49bb30dbaf1a87dfeb551acb1034"
-    }
-  ]
+  "base": "127ec613e8a430ee841cca54d617901f1409ea56",
+  "patch_sha256": "8233ad8c26a16ed9ec99c2d713123c06e87718807cd78f5b0a079aa5d048f35d",
+  "files": {
+    "CONTROLS.txt": "42df1344cf9eeca450d4a2a78c42a6a9831dafa2b9f5ea204a4f1113b36789d1",
+    "Scripts/tyjokr_a11y_basement.py": "d5a4d1c9f6b0f050d9e1a5e6b7ebcea87d154cf0a1fcf703b52237345efe7901",
+    "Scripts/tyjokr_a11y_build_coordinates.py": "91a34d5d32ca1e7c68b4c749c1f855cce3cb9b8b32e747a1c4d199bb7dac19f1",
+    "Scripts/tyjokr_a11y_build_helpers.py": "c852206e9d0bbd3f4a7493762de67f5c25a61ebe33eafaa4b689326cf1c3362c",
+    "Scripts/tyjokr_a11y_event_goals.py": "8f8ae339765056d1c49040a7116010954959cc79e03e87bbd75a55ff5cef3ac2",
+    "Scripts/tyjokr_a11y_house_workflow.py": "06032c596810e6bfeaf917a628be0839593d996037a0153c36c4347720bd65f9",
+    "Scripts/tyjokr_a11y_hub.py": "f7cd9e384fc2dc8114482e44ed28218d3c294a8d31f8b1e2050bd522a96388f4",
+    "Scripts/tyjokr_a11y_lang.py": "e268fdb8e34756ca0cf4bd7f62ccdcd0258a3f56c3dd7f1d8f13454d04a5692e",
+    "contrib-reference/modules/tyjokr_a11y_contrib.py": "4e7fa0a27b9a89ecbd63dba84d7d7f4ad86b824e275ed2077de597587749ff73",
+    "docs/development/audits/requested-ui-2026-11-09.md": "967afd26821a07bf95464a0362a8026ff0c6678538f55d2c3cb58325621e600b",
+    "docs/development/changes/basement-adapter.md": "8a7ddb9efcce442ed3a5fab24d3c4482e965a6ecb7c55cea492b9f37e8c959b6",
+    "docs/development/changes/build-helper-integration.md": "45e8528650f9979a5a60e5365d5d68d055e5455a6b63c079cd89895b31bec55b",
+    "docs/development/changes/graphics-option-labels.md": "ccf2406402093552ecdd10fb2a12a1507265681f66afc5e9bd7fd9140f152eba",
+    "docs/development/changes/measured-build-coordinates.md": "58cf985993ccb529e4d038e0a5146cf70fe4f67d44090268f7b8d89805e98830",
+    "docs/development/changes/native-floor-and-stair-isolation.md": "c3addfd94f3832712a784c7bffd653732cdf77e3cd01f2d32453faeaecfe677e",
+    "docs/development/changes/unified-house-workflow.md": "b21b30334f141dbde19c911b5e9efcb1f65e00eebcaa64164df366a3c49ae6ab",
+    "flash/TooltipManager_patched.as": "785ba588fd6064a1fe305b56f1cd461d29b1b1bd884b8191adadc7bce1260cd7",
+    "flash/extra-classes/ControlPanel.as": "63a0aacf862c2de4aa30784a232be7d9e0700d00607f18ff50473500813a2186",
+    "tools/test_basement_adapter.py": "e3f3ee60db0ec450b9d53d0298912bf2ee24ee1b3f8ef0b19c78fbac44667edd",
+    "tools/test_build_coordinates.py": "51619f9aea904b136275853e51a75abf79f607b8af1a6568b3e91df3f6856392",
+    "tools/test_build_helpers.py": "caad5ef4da1e6e7a9e14f4590375a834d267ab5c3ffec51292f25e0c6ca2ccac",
+    "tools/test_coordinate_probe.js": "861fa7aead20e17a42f08ba9441291ff8419fa689ffc5b7f9ebc4a40d87f056d",
+    "tools/test_event_activation_v13.js": "f751431bdf67c7df59859383b80eece119d429ef2ba31d715e45f544046c2019",
+    "tools/test_event_goals.py": "c6e29420b202bfd3d8917166c10605ea8b0fad4f67c416ab0fc2188554238d44",
+    "tools/test_flash_navigation_v10.js": "697d318401f56fca07c76a16c491f37b8ed2c3fa49ea85f62eea66dfd3ab7922",
+    "tools/test_house_workflow.py": "d6b129a6d03bcbcefc00fb79c298c1e90df9fc0495f91dd0ce0b39b783e0b343",
+    "tools/test_native_floor_bridge.js": "8024ab1f41a9022aa852a796430ca61b78b648172f20c9baa48d49af3f62753d",
+    "tools/test_options_simplified.js": "69d7a941997a3bdb3df74587b87331848ccb49bb30dbaf1a87dfeb551acb1034",
+    "tools/test_requested_ui_access.js": "7a1e4222cfea5af08c6c1c11c49cc7d5624c597489b7c9c602acdaf1f01be41d"
+  }
 }

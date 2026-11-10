@@ -1,9 +1,8 @@
 # Changed code
 
-- `Scripts/tyjokr_a11y_build_coordinates.py`: coordinate mapping, native input guards and diagnostic command. New module.
-- `contrib-reference/modules/tyjokr_a11y_contrib.py`: adapter install hook around line 463 in `install()`.
-- `flash/TooltipManager_patched.as`: `A11yCoordinate*` methods and marker fields around line 307; one `coords` branch in `A11yHandleEncoded` around line 4052.
-- `flash/TooltipManager_patched.as`: `A11yGraphicsRowLabel` and one call from `A11yOptionsRowLabel` around line 6213; `A11yCheckboxState` recognizes the native Graphics LeftLabelCheckBox class.
-- `CHEATS.txt`: diagnostic command.
-
-Compiled archive: replace `tyjokr_a11y_contrib.pyc`, add `tyjokr_a11y_build_coordinates.pyc`; 60 existing entries preserved. Install the script and both UI packages as a matching set. BUILD-HASHES.json identifies the input and output files. Source patch is anchored to commit 127ec613e8a430ee841cca54d617901f1409ea56.
+- flash/TooltipManager_patched.as: native card/input traversal, state readback and bounded event/photography focus; function starting lines: A11yEventGoalFind 3752, A11yEventGoals 3802, A11yPhotography 3846, A11yCompositeRow 6781, A11yCollectFocusables 5170, A11yAnnounceDisplay 8412, A11yCheckboxState 8019, A11yActivate 7864. Rebuilt all 29 shared definitions.
+- Scripts/tyjokr_a11y_event_goals.py: native goal query/reply lifetime; hub.py: event action and photography panel entries; lang.py: their labels.
+- Scripts/tyjokr_a11y_house_workflow.py and tyjokr_a11y_basement.py: unified plan review, fresh native floor ranges, basement tool confirmation and verification diagnostics.
+- Scripts/tyjokr_a11y_build_coordinates.py, tyjokr_a11y_build_helpers.py and flash/extra-classes/ControlPanel.as: measured viewport/client coordinates, native floor query and verified floor/stair integration.
+- contrib-reference/modules/tyjokr_a11y_contrib.py: adapter installation hooks. tools/test_*: focused regression fixtures.
+- changed-source contains cumulative changed source; CHANGES.patch is reversible against 127ec613e8a430ee841cca54d617901f1409ea56. BUILD-HASHES.json identifies compiled files.

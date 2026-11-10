@@ -1,0 +1,3026 @@
+diff --git a/CONTROLS.txt b/CONTROLS.txt
+index 4f97283..5ad92d7 100644
+--- a/CONTROLS.txt
++++ b/CONTROLS.txt
+@@ -330,3 +330,30 @@ Backspace: Exit the grid.
+ 
+ In Live mode the grid only reads the lot. It does not place objects.
+ 
++EXPERIMENTAL BASEMENTS
++
++Alt+B, Basement assistant (experimental): build a rectangular basement room
++or inspect native floor bounds and existing basement rooms without building.
++Choose the size and position, then confirm before any construction.
++Stacked-house plans with a basement use this adapter automatically.
++Accessibility settings: experimental basement creation turns it on or off.
++Each basement room is drawn from ground level with the native Basement Tool;
++its floor, complete rectangular footprint and unchanged existing rooms must
++be verified before the helper continues to the next room, doors or stairs.
++
++UNIFIED HOUSE BUILDER
++
++Alt+B, Build my house: start with an original ready-made layout, design a
++square or rectangle, or choose the original room list. All routes use one
++review screen. Choose Stories and basement to repeat aligned floor layouts.
++Choose Rooms, positions and custom names to edit one room at a time.
++Descriptions give the actual compass position and street-facing/rear role.
++Construction starts only after selecting Build this house in the review.
++The separate Configurable stacked house row is replaced by this flow.
++
++
++Requested screen additions:
++Accessibility menu > Events > selected running event > Current event goals.
++Accessibility menu > Panels > Photography controls (open the camera first).
++Social Bunny: arrow/Tab through each readable card and its native action buttons.
++Book title dialogs: use Tab or Shift+Tab to leave the text field, then navigate to the native confirmation footer.
+diff --git a/Scripts/tyjokr_a11y_basement.py b/Scripts/tyjokr_a11y_basement.py
+new file mode 100644
+index 0000000..4715055
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_basement.py
+@@ -0,0 +1,335 @@
++"""Experimental native basement drawing, isolated from ordinary room workers."""
++import configparser
++import math
++import threading
++import time
++
++_build = None
++_core = None
++_helpers = None
++_original_room = None
++_original_menu = None
++_original_reply = None
++_original_render = None
++_selection = None
++_failure = threading.local()
++SETTING = 'experimental_basement'
++TOOL = 'Basement Tool'
++
++
++def _log(kind, **data):
++    import json
++    import tyjokr_a11y_speech as speech
++    speech.log_line('basement adapter: ' + json.dumps(dict(kind=kind, **data), sort_keys=True, default=str))
++
++
++def _enabled():
++    import tyjokr_a11y_settings as settings
++    return bool(settings.get(SETTING, True))
++
++
++def _context():
++    import services
++    state = _helpers._state()
++    state['household'] = int(services.active_household_id())
++    return state
++
++
++def _same_context(state):
++    import services
++    return (_enabled() and _helpers._same_world(state)
++            and int(services.active_household_id()) == state['household'])
++
++
++def _rooms():
++    result = _build._room_ids()
++    if result is None: raise RuntimeError('The game did not supply its room geometry')
++    return {(tuple(box), int(level)) for box, level in result}
++
++
++def _overlap(a, b):
++    return max(a[0], b[0]) < min(a[2], b[2]) and max(a[1], b[1]) < min(a[3], b[3])
++
++
++def _bounds(want, frame):
++    if len(want) != 4 or any(isinstance(v, bool) or not isinstance(v, (int,float))
++            or not math.isfinite(v) or int(v) != v for v in want):
++        raise ValueError('Basement corners must be four whole-metre coordinates')
++    box = tuple(int(v) for v in want)
++    if not (1 <= box[0] < box[2] <= frame.width-1 and 1 <= box[1] < box[3] <= frame.depth-1):
++        raise ValueError('The basement must fit at least one metre inside the lot')
++    return box
++
++
++def _reply(encoded=''):
++    # Leave all existing catalog, placement and scanner reply behavior intact.
++    result = _original_reply(encoded)
++    job = _selection
++    if job is not None:
++        try:
++            from urllib.parse import unquote
++            parts = unquote(str(encoded or '')).split('|')
++            if (len(parts) == 3 and parts[0] == 'selected'
++                    and parts[1] == str(job['index']) and unquote(parts[2]) == job['name']
++                    and _build._cat['serial'] == job['serial']):
++                job['done'].set()
++        except Exception:
++            _core.log_exc('basement tool reply')
++    return result
++
++
++def _tool(name, state):
++    global _selection
++    if not _build.on_main(_same_context, state): return False
++    # The native bridge replaces its catalog array. An old index must never
++    # reselect an unrelated tool if this query or selection is interrupted.
++    _build.on_main(_build._cat.pop, 'chosen', None)
++    items = _build.fetch_catalog(16, '', 'tool') or []
++    names = [item[0] for item in items]
++    _log('catalog', wanted=name, tools=names)
++    if name not in names or not _build.on_main(_same_context, state): return False
++    index = names.index(name)
++    job = {'index':index, 'name':name, 'serial':_build._cat['serial'], 'done':threading.Event()}
++    _selection = job
++    silent = _build._cat.get('silent_select', False)
++    try:
++        _build._cat['silent_select'] = True
++        _build.select_item(index, name)
++        acknowledged = job['done'].wait(2.0)
++        _log('tool-selection', name=name, acknowledged=acknowledged)
++        return acknowledged and bool(_build.on_main(_same_context, state))
++    finally:
++        _selection = None
++        _build._cat['silent_select'] = silent
++
++
++def _check_result(before, after, wanted):
++    target = (wanted, -1)
++    # A bounding box alone cannot count a ground-floor room as a basement.
++    return target in after-before and before.issubset(after) and after-before == {target}
++
++
++def _rectangle(wanted):
++    import tyjokr_a11y_plus_rooms as rooms
++    frame = _build.frame()
++    matches = [r for r in rooms.scan_rooms() if int(r.level) == -1 and _build._room_box(r) == wanted]
++    if len(matches) != 1: return False
++    actual = {(int(math.floor(frame.local(x,z)[0])), int(math.floor(frame.local(x,z)[1]))) for x,z in matches[0].tiles}
++    expected = {(x,z) for x in range(wanted[0],wanted[2]) for z in range(wanted[1],wanted[3])}
++    return actual == expected
++
++
++def _draw(want, overview):
++    state = _build.on_main(_context)
++    if not state: raise RuntimeError('The simulation thread did not answer')
++    frame = _build.on_main(_build.frame)
++    if frame is None: raise RuntimeError('The lot geometry is unavailable')
++    wanted = _bounds(want, frame)
++    before = _build.on_main(_rooms)
++    if before is None: raise RuntimeError('Room inspection timed out')
++    if any(level == -1 and _overlap(box,wanted) for box,level in before):
++        _log('occupied', wanted=wanted)
++        return 'occupied'
++    if not _build.set_floor(0): return 'nofloor'
++    selected = False
++    attempted = False
++    result = 'nocatalog'
++    restore_ok = True
++    try:
++        attempted = True
++        selected = _tool(TOOL, state)
++        if not selected:
++            _core.post(_core.speak, 'The native Basement Tool was not confirmed. Nothing was drawn. Its catalog entries were logged.')
++            return 'nocatalog'
++        points = [frame.world(wanted[0],wanted[1]), frame.world(wanted[2],wanted[3])]
++        started = time.monotonic()
++        funds_before = _build.on_main(_build.funds)
++        def action(screen):
++            if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed before the basement drag')
++            if not _tool(TOOL,state): raise RuntimeError('The Basement Tool could not be confirmed after camera preparation')
++            info = _helpers._native_floor(state)
++            if info['floor'] != 0: raise RuntimeError('The game is no longer showing the ground floor')
++            _log('drag', wanted=wanted, input_floor=0, expected_floor=-1, native_floor=info)
++            _build.drag(screen[0],screen[1])
++        performed = _build.point_and_act(points,0,action,'experimental basement {}'.format(wanted),overview=overview)
++        if not performed: return 'noscreen'
++        _log('after-drag', native_floor=_helpers._native_floor(state), funds_before=funds_before, funds_after=_build.on_main(_build.funds))
++        after = before
++        for attempt in range(20):
++            if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed while checking the basement')
++            after = _build.on_main(_rooms)
++            if after is None: raise RuntimeError('Basement verification timed out')
++            if after != before: break
++            time.sleep(.25)
++        okay = _check_result(before,after,wanted) and bool(_build.on_main(_rectangle,wanted))
++        error = _build._last_error
++        reason = error.get('text','') if error.get('at',0) >= started else ''
++        _log('verification', wanted=wanted, expected_floor=-1, new=sorted(after-before),
++             removed=sorted(before-after), success=okay, game_reason=reason)
++        result = wanted if okay else 'unverified'
++        if not okay:
++            _core.post(_core.speak, 'Basement construction stopped: the game did not confirm the requested room on floor minus one.'
++                       + (' Game message: '+reason if reason else '') + ' Inspect the result before using Undo or trying again.')
++    finally:
++        # Never leave Basement Tool selected for the next above-ground room.
++        if attempted:
++            if _build.on_main(_same_context,state): restore_ok = _tool('Room Tool',state)
++            else: restore_ok = False
++            _log('restore-room-tool', success=restore_ok)
++    if not restore_ok:
++        _core.post(_core.speak,'The basement step stopped because the ordinary Room Tool could not be restored.')
++        return 'nocatalog'
++    return result
++
++
++def failure_reason():
++    return getattr(_failure,'reason','')
++
++
++def room_worker(want, overview=False, tries=4, level=0):
++    _failure.reason = ''
++    if level != -1:
++        return _original_room(want,overview=overview,tries=tries,level=level)
++    if not _enabled():
++        _core.post(_core.speak,'Experimental basement creation is off in accessibility settings.')
++        result = 'disabled'
++    else:
++        try:
++            result = _draw(want,overview)
++        except Exception as exc:
++            _log('stopped', wanted=want, error=str(exc))
++            _core.post(_core.speak,'Basement construction stopped. '+str(exc))
++            result = 'unverified'
++    if result != tuple(want):
++        _failure.reason = {'disabled':'experimental basement creation is turned off',
++                          'occupied':'the requested footprint overlaps an existing basement room',
++                          'nofloor':'the game could not reach the ground floor for the basement tool',
++                          'nocatalog':'the required native tool selection was not confirmed',
++                          'noscreen':'the corners could not be framed clear of the interface'}.get(result,'the requested room on floor minus one could not be verified')
++    return result
++
++
++def _start_room(wanted):
++    if _build._busy[0]:
++        _core.speak('Still working on the last build step.'); return
++    if not _enabled():
++        _core.speak('Turn on experimental basement creation in accessibility settings first.'); return
++    _build._busy[0] = True
++    _core.speak('Building the basement room. Please do not press keys until it finishes.')
++    def work():
++        try:
++            result = room_worker(wanted,overview=True,level=-1)
++            if result == wanted:
++                shown = _build.set_floor(-1)
++                _core.post(_core.speak,'The basement room was verified on floor minus one. '
++                           + ('The game now shows the basement.' if shown else 'The room exists, but the game could not switch to its floor.'))
++            else:
++                _core.post(_core.speak,'The basement room was not completed: {}. No further rooms were attempted.'.format(result))
++        finally:
++            _build._busy[0] = False
++    try: threading.Thread(target=work,name='a11y_basement_room',daemon=True).start()
++    except Exception:
++        _build._busy[0] = False
++        raise
++
++
++def _ask_room():
++    def size(text):
++        values = _build._numbers(text)
++        if len(values) != 2 or any(v < 1 or v > 30 for v in values):
++            _core.speak('Type a width and depth between 1 and 30 metres.'); return
++        width,depth = values
++        def position(text):
++            coords = _build._numbers(text)
++            if len(coords) != 2:
++                _core.speak('Type meters from west and north, for example 2 3.'); return
++            wanted = (coords[0],coords[1],coords[0]+width,coords[1]+depth)
++            try: _bounds(wanted,_build.frame())
++            except ValueError as exc: _core.speak(str(exc)); return
++            rows=[('Build this basement room','Uses the native tool and spends household funds only if the game accepts it.',True),('Cancel',None,False)]
++            _core.choose('Confirm experimental basement','{} by {} metres, {} from west and {} from north. Floor minus one. Existing basement rooms must not overlap this footprint.'.format(width,depth,*coords),rows,
++                         lambda yes:_start_room(wanted) if yes else None,tag='build')
++        _core.ask_text('Basement position','Type meters from the west edge, then the north edge of the lot. For example 2 3.','',position)
++    _core.ask_text('Basement size','Type width west to east and depth north to south in metres, for example 4 5.','',size)
++
++
++def _inspect():
++    if _build._busy[0]: _core.speak('Still working on the last build step.'); return
++    _build._busy[0] = True
++    def work():
++        try:
++            state = _build.on_main(_context)
++            info = _helpers._native_floor(state)
++            geometry = _build.on_main(_rooms)
++            if geometry is None: raise RuntimeError('Room inspection timed out')
++            basements = sorted(box for box,level in geometry if level == -1)
++            _log('inspect', basement_rooms=basements, native_floor=info)
++            _core.post(_core.speak,'Logged current floor bounds and {} basement rooms. Nothing was built or selected.'.format(len(basements)))
++        except Exception as exc:
++            _log('inspect-failed',error=str(exc)); _core.post(_core.speak,'Basement inspection failed. '+str(exc))
++        finally: _build._busy[0] = False
++    try: threading.Thread(target=work,name='a11y_basement_inspect',daemon=True).start()
++    except Exception:
++        _build._busy[0] = False; raise
++
++
++def open_assistant():
++    if not _build.in_build_mode(): _core.speak('Enter Build mode first.'); return
++    rows=[('Build a rectangular basement room','Choose size and position; verifies floor minus one before reporting success.',_ask_room),
++          ('Inspect basement floors and rooms','Read-only native-floor and room diagnostics; builds and selects nothing.',_inspect)]
++    _core.choose('Basement assistant (experimental)','Stacked houses with a basement use the same adapter automatically. Creation can be turned off in accessibility settings.',rows,lambda fn:fn(),tag='build')
++
++
++def _open_menu():
++    choose = _core.choose
++    def extended(title,prompt,rows,callback,tag=None,*args,**kwargs):
++        if title == 'Build helper':
++            rows=list(rows)+[('Basement assistant (experimental)','Build a basement room or inspect native floors and existing rooms.',open_assistant)]
++        return choose(title,prompt,rows,callback,tag,*args,**kwargs)
++    _core.choose = extended
++    try: return _original_menu()
++    finally: _core.choose = choose
++
++
++def _render(stored):
++    import tyjokr_a11y_settings as settings
++    base = _original_render(stored)
++    line = 'experimental basement = {}\n'.format('on' if stored.get(SETTING,settings.DEFAULTS[SETTING]) else 'off')
++    marker = '[contribution]\n'
++    return base.replace(marker,marker+line,1) if marker in base else base.rstrip()+'\n\n'+marker+line
++
++
++def _install_setting():
++    global _original_render
++    import tyjokr_a11y_settings as settings
++    import tyjokr_a11y_menu as menu
++    settings.DEFAULTS.setdefault(SETTING,True)
++    settings._FILE_MAP[('contribution','experimental basement')] = SETTING
++    if SETTING not in settings._BOOL_KEYS: settings._BOOL_KEYS = tuple(settings._BOOL_KEYS)+(SETTING,)
++    parser = configparser.ConfigParser(interpolation=None,strict=False,inline_comment_prefixes=(';','#'))
++    try:
++        with open(settings.PATH,'r',encoding='utf-8') as handle: parser.read_file(handle)
++        value = parser.get('contribution','experimental basement',fallback='').strip().lower()
++        if value in settings._TRUE_WORDS: settings._stored[SETTING] = True
++        elif value in settings._FALSE_WORDS: settings._stored[SETTING] = False
++    except (OSError,configparser.Error): pass
++    _original_render = settings._render
++    settings._render = _render
++    if not any(row.key==SETTING for row in menu.ROWS):
++        index = next((i for i,row in enumerate(menu.ROWS) if row.key=='reload'),len(menu.ROWS))
++        menu.ROWS.insert(index,menu.Row(SETTING,'bool','experimental basement creation',help='uses the native Basement Tool from ground level and verifies the result below'))
++        menu._SETTING_ROWS = [row for row in menu.ROWS if row.kind!='action']
++
++
++def install():
++    global _build,_core,_helpers,_original_room,_original_menu,_original_reply
++    import tyjokr_a11y_plus_build as build
++    import tyjokr_a11y_plus_core as core
++    import tyjokr_a11y_build_helpers as helpers
++    if getattr(build,'_basement_adapter_installed',False): return
++    _build,_core,_helpers = build,core,helpers
++    _install_setting()
++    _original_room,_original_menu,_original_reply = build.room_worker,build.open_menu,build._flash_reply
++    build.room_worker,build.open_menu,build._flash_reply = room_worker,_open_menu,_reply
++    build._basement_adapter_installed = True
++    _log('installed',experimental=True,enabled=_enabled())
+diff --git a/Scripts/tyjokr_a11y_build_coordinates.py b/Scripts/tyjokr_a11y_build_coordinates.py
+new file mode 100644
+index 0000000..3e82d5c
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_build_coordinates.py
+@@ -0,0 +1,315 @@
++"""Measured UI -> client -> physical-screen boundary for build helpers.
++
++No resolution presets or extra DPI multiplier. Native projection is read-only;
++actual clicks/drags remain the existing helpers and the game's validation.
++"""
++import contextlib
++import ctypes
++import json
++import math
++import os
++import threading
++import time
++from urllib.parse import unquote
++import sims4.commands
++import tyjokr_a11y_speech as speech
++import tyjokr_a11y_display_diagnostic as display
++
++_build = None
++_frame = None
++_serial = 0
++_pending = {}
++_lock = threading.Lock()
++_local = threading.local()
++
++
++def _log(kind, **data):
++    speech.log_line('build coordinates: ' + json.dumps(dict(kind=kind, **data), sort_keys=True, default=str))
++
++
++def _api():
++    u = display._api()
++    signatures = {
++        'SetThreadDpiAwarenessContext': (ctypes.c_void_p, [ctypes.c_void_p]),
++        'SetCursorPos': (ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]),
++        'mouse_event': (None, [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t]),
++        'GetAsyncKeyState': (ctypes.c_short, [ctypes.c_int32]),
++        'GetAncestor': (ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_uint32]),
++        'keybd_event': (None, [ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_size_t]),
++    }
++    for name, (result, args) in signatures.items():
++        fn = getattr(u, name)
++        fn.restype, fn.argtypes = result, args
++    return u
++
++
++@contextlib.contextmanager
++def physical_context(u):
++    previous = u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
++    if not previous: raise RuntimeError('Per-monitor coordinate context unavailable')
++    try: yield
++    finally:
++        if not u.SetThreadDpiAwarenessContext(previous):
++            _log('dpi-restore-failed')
++            raise RuntimeError('Thread DPI context could not be restored')
++
++
++def window(u):
++    hwnd = u.GetForegroundWindow()
++    pid = ctypes.c_uint32()
++    if not hwnd or not u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or pid.value != os.getpid():
++        raise RuntimeError('The game must remain focused')
++    if u.GetAncestor(hwnd,3)!=hwnd:raise RuntimeError('Close the native game dialog before building')
++    if u.IsIconic(hwnd): raise RuntimeError('The game window is minimized')
++    rect = display.RECT(); origin = display.POINT(0, 0)
++    if not u.GetClientRect(hwnd, ctypes.byref(rect)) or not u.ClientToScreen(hwnd, ctypes.byref(origin)):
++        raise RuntimeError('Game window geometry unavailable')
++    w, h = int(rect.right-rect.left), int(rect.bottom-rect.top)
++    desktop = tuple(int(u.GetSystemMetrics(i)) for i in (76,77,78,79))
++    if min(w,h,desktop[2],desktop[3]) < 100: raise RuntimeError('Invalid game window dimensions')
++    return (int(hwnd),origin.x,origin.y,w,h,int(u.GetDpiForWindow(hwnd)),desktop,
++            int(u.GetWindowLongPtrW(hwnd,-16)))
++
++
++def capture_window():
++    u = _api()
++    with physical_context(u): return window(u)
++
++
++class Frame:
++    def __init__(self, zone, width, height, mode, bounds, layout, geometry, align=''):
++        if not all(math.isfinite(v) for v in (width,height,*bounds,*layout)):
++            raise ValueError('Non-finite viewport')
++        if not (100 <= width <= 100000 and 100 <= height <= 100000): raise ValueError('Invalid viewport')
++        if mode not in ('noScale','exactFit','showAll','noBorder'): raise ValueError('Unverified stage scale mode: '+mode)
++        if mode in ('showAll','noBorder') and align not in ('','T','B','L','R','TL','TR','BL','BR','LT','RT','LB','RB'):
++            raise ValueError('Unknown stage alignment: '+repr(align))
++        if min(layout) < 100 or not (0 <= bounds[0] < bounds[2] <= layout[0] and 0 <= bounds[1] < bounds[3] <= layout[1]):
++            raise ValueError('Invalid build bounds')
++        self.zone,self.width,self.height,self.mode,self.geometry=zone,width,height,mode,geometry
++        self.sx,self.sy=geometry[3]/width,geometry[4]/height
++        self.ox=self.oy=0.0
++        if mode in ('showAll','noBorder'):
++            self.sx=self.sy=(min if mode=='showAll' else max)(self.sx,self.sy)
++            free_x,free_y=geometry[3]-width*self.sx,geometry[4]-height*self.sy
++            self.ox=0.0 if 'L' in align else free_x if 'R' in align else free_x/2
++            self.oy=0.0 if 'T' in align else free_y if 'B' in align else free_y/2
++        self.bounds=(bounds[0]*width/layout[0],bounds[1]*height/layout[1],bounds[2]*width/layout[0],bounds[3]*height/layout[1])
++    def client(self, x, y, offset=(0,0)):
++        x,y=float(x)+offset[0],float(y)+offset[1]
++        if not (math.isfinite(x) and math.isfinite(y) and 0 <= x < self.width and 0 <= y < self.height):
++            raise ValueError('Projected point is outside the game viewport')
++        result=(int(round(self.ox+x*self.sx)),int(round(self.oy+y*self.sy)))
++        if not (0<=result[0]<self.geometry[3] and 0<=result[1]<self.geometry[4]):raise ValueError('Projected point is cropped from the viewport')
++        return result
++    def clear(self,p):
++        x,y=p;left,top,right,bottom=self.bounds
++        return left <= x <= right and top <= y <= bottom and .02*self.width <= x <= .98*self.width and .08*self.height <= y <= .70*self.height
++
++
++@sims4.commands.Command('a11y.coords_enc', command_type=sims4.commands.CommandType.Live)
++def receive(text: str = '', _connection=None):
++    try:
++        if len(text)>3000:return False
++        fields=unquote(text).split('|')
++        if len(fields)!=15:return False
++        ident=int(fields[0]);zone=int(fields[1]);status=fields[2]
++        with _lock:job=_pending.get(ident)
++        if job is None or job['zone']!=zone:return False
++        if status not in ('point','viewport'):
++            job['result']={'status':status};job['event'].set();return True
++        values=[float(fields[i]) for i in (3,4,5,6,9,10,11,12,13,14)]
++        if not all(math.isfinite(v) for v in values[2:]):return False
++        if status=='point' and not all(math.isfinite(v) for v in values[:2]):return False
++        job['result']={'status':status,'zone':zone,'point':tuple(values[:2]),'width':values[2],'height':values[3],
++                       'mode':fields[7],'align':fields[8],'layout':tuple(values[4:6]),'bounds':tuple(values[6:10])}
++        job['event'].set();return True
++    except Exception as exc:
++        _log('reply-rejected',error=type(exc).__name__);return False
++
++
++def _measure(x,z,level,height=0.0,timeout=3.0):
++    global _serial,_frame
++    before=capture_window()
++    with _lock:
++        _serial=(_serial%2147483646)+1;ident=_serial
++        job={'event':threading.Event(),'zone':None,'result':None}
++        _pending[ident]=job
++    def start():
++        try:
++            import services
++            job['zone']=int(services.current_zone_id())
++            y=_build.floor_height(x,z,level)+height
++            _build._send_ui('A11y|coords|{}|{:.6f}|{:.6f}|{:.6f}|{}|{}'.format(ident,x,y,z,level,job['zone']))
++        except Exception as exc:
++            job['result']={'status':'request-error','error':type(exc).__name__};job['event'].set()
++    _build.core.post(start)
++    try:
++        if not job['event'].wait(timeout):raise RuntimeError('Projection measurement timed out; check paired UI packages')
++        result=job['result']
++        if not result or result['status'] not in ('point','viewport'):raise RuntimeError('Projection refused: '+str(result))
++        after=capture_window()
++        if before!=after:raise RuntimeError('Game window changed during projection')
++        _log('raw-measure',response=result,window=after)
++        frame=Frame(result['zone'],result['width'],result['height'],result['mode'],result['bounds'],result['layout'],after,result['align'])
++        _frame=frame
++        _log('measure',response=result,window=after)
++        return result,frame
++    finally:
++        with _lock:_pending.pop(ident,None)
++
++
++def project(x,z,level,timeout=2.5,height=0.0):
++    try:
++        result,frame=_measure(x,z,level,height,timeout=max(2.5,timeout))
++        return result['point'] if result['status']=='point' else None
++    except Exception as exc:
++        _log('project-refused',error=str(exc));return None
++
++
++def _current(u):
++    frame=getattr(_local,'input_frame',None) or _frame
++    if frame is None:raise RuntimeError('Measure the game viewport before building')
++    if window(u)!=frame.geometry:raise RuntimeError('Game focus, size, position or DPI changed; retry the operation')
++    import sys
++    keys=sys.modules.get('tyjokr_a11y_keys')
++    if keys is not None and (getattr(keys,'_editing_active',False) or keys.blocking_active()):
++        raise RuntimeError('Close the open game dialog before building')
++    return frame
++
++
++def stage_size():
++    u=_api()
++    with physical_context(u):f=_current(u);return f.width,f.height
++
++
++def to_screen(x,y):
++    u=_api()
++    with physical_context(u):
++        f=_current(u);cx,cy=f.client(x,y,_build.OFFSET)
++        point=display.POINT(cx,cy)
++        if not u.ClientToScreen(f.geometry[0],ctypes.byref(point)):raise RuntimeError('Client conversion failed')
++        _log('convert',ui=[x,y],client=[cx,cy],screen=[point.x,point.y],window=f.geometry)
++        return point.x,point.y
++
++
++def _release(u):
++    if getattr(_local,'down',False):
++        u.mouse_event(4,0,0,0,0);_local.down=False
++
++
++def move_to(x,y):
++    u=_api()
++    try:
++        with physical_context(u):
++            f=_current(u);g=f.geometry;x,y=int(round(x)),int(round(y))
++            if not _build.on_main(_safe_game,f.zone):raise RuntimeError('Build Mode changed during pointer operation')
++            _current(u)
++            if not (g[1]<=x<g[1]+g[3] and g[2]<=y<g[2]+g[4]):raise RuntimeError('Mouse point is outside the game window')
++            left,top,w,h=g[6]
++            nx=int(round((x-left)*65535/max(1,w-1)));ny=int(round((y-top)*65535/max(1,h-1)))
++            if not (0<=nx<=65535 and 0<=ny<=65535):raise RuntimeError('Mouse point outside virtual desktop')
++            if not u.SetCursorPos(x,y):raise RuntimeError('Pointer positioning failed')
++            u.mouse_event(0xc001,nx,ny,0,0)
++            p=display.POINT()
++            if not u.GetPhysicalCursorPos(ctypes.byref(p)) or abs(p.x-x)>2 or abs(p.y-y)>2:
++                raise RuntimeError('Physical pointer did not reach the requested point')
++            _local.last=(x,y)
++    except Exception:
++        _release(u);raise
++
++
++def _safe_game(zone):
++    import services
++    import tyjokr_a11y_place as place
++    import tyjokr_a11y_keys as keys
++    return place.in_build_mode() and int(services.current_zone_id())==zone and not keys.blocking_active() and not keys._editing_active
++
++
++def mouse(flags,data=0):
++    u=_api()
++    if flags==_build.LEFT_UP:
++        u.mouse_event(flags,0,0,data,0);_local.down=False;return
++    if flags!=_build.LEFT_DOWN:
++        return _original_mouse(flags,data)
++    try:
++        with physical_context(u):
++            f=_current(u)
++            if not _build.on_main(_safe_game,f.zone):raise RuntimeError('Build context changed before click')
++            p=display.POINT();last=getattr(_local,'last',None)
++            if last is None or not u.GetPhysicalCursorPos(ctypes.byref(p)) or max(abs(p.x-last[0]),abs(p.y-last[1]))>2:
++                raise RuntimeError('Pointer moved before click')
++            _current(u)
++            u.mouse_event(flags,0,0,data,0);_local.down=True
++    except Exception:
++        _release(u);raise
++
++
++def clear_of_panels(point):
++    try:
++        u=_api()
++        with physical_context(u):return _current(u).clear(point)
++    except Exception:return False
++
++
++def _guarded_action(original,args,shift):
++    u=_api()
++    with physical_context(u):
++        f=_current(u)
++        if shift and u.GetAsyncKeyState(0x10)&0x8000:raise RuntimeError('Release Shift before using this helper')
++        _local.input_frame=f
++        try:return original(*args,shift=shift)
++        finally:
++            _release(u)
++            if shift:u.keybd_event(0x10,0x2a,2,0)
++            _local.input_frame=None
++
++
++def park_mouse():
++    try:
++        u=_api()
++        with physical_context(u):
++            g=window(u)
++            u.SetCursorPos(g[1]+g[3]//2,g[2]+g[4]//3)
++    except Exception:pass
++
++
++def install():
++    global _build,_original_mouse
++    import tyjokr_a11y_plus_build as build
++    if getattr(build,'_measured_coordinates_installed',False):return
++    _build=build;_original_mouse=build._mouse
++    original_click,original_drag=build.click,build.drag
++    def click(a,shift=False):return _guarded_action(original_click,(a,),shift)
++    def drag(a,b,shift=False):return _guarded_action(original_drag,(a,b),shift)
++    build.project=project;build._stage_size=stage_size;build._to_screen=to_screen
++    build.move_to=move_to;build._mouse=mouse;build.click=click;build.drag=drag
++    build._clear_of_panels=clear_of_panels;build.park_mouse=park_mouse
++    build._measured_coordinates_installed=True
++    _log('installed')
++
++
++@sims4.commands.Command('a11y.buildcoords', command_type=sims4.commands.CommandType.Live)
++def preflight(delay: float=5,_connection=None):
++    if not math.isfinite(delay):return False
++    install()
++    def work():
++        def target():
++            import services
++            sim=services.get_active_sim()
++            if sim is None:raise RuntimeError('Load a household first')
++            return float(sim.position.x),float(sim.position.z),int(sim.level)
++        try:
++            point=_build.on_main(target)
++            if point is None:raise RuntimeError('Game target unavailable')
++            result,frame=_measure(*point)
++            # Mapping only: never call move_to, mouse, click, drag or park.
++            mapped=to_screen(*result['point']) if result['status']=='point' and frame.clear(result['point']) else None
++            _log('preflight',response=result,physical_point=mapped,window=frame.geometry)
++            text='Build coordinate check complete. No pointer movement or construction. See TS4 Access log.'
++        except Exception as exc:
++            _log('preflight-failed',error=str(exc));text='Build coordinate check failed: '+str(exc)
++        _build.core.post(lambda:speech.speak(text,explicit=True))
++    timer=threading.Timer(max(0,min(30,delay)),work);timer.daemon=True;timer.name='a11y_build_coordinate_check';timer.start()
++    sims4.commands.CheatOutput(_connection)('Read-only projection check scheduled. Close the console and keep Build Mode focused.')
++    return True
+diff --git a/Scripts/tyjokr_a11y_build_helpers.py b/Scripts/tyjokr_a11y_build_helpers.py
+new file mode 100644
+index 0000000..c384013
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_build_helpers.py
+@@ -0,0 +1,250 @@
++"""Narrow integration fixes for the existing house/structure helpers."""
++import contextlib
++import math
++import time
++import threading
++
++_floor_lock = threading.Lock()
++_floor_job = None
++_floor_sequence = -1
++_floor_quarantined = False
++_original_house_build = None
++_original_house_stairs = None
++_planner = None
++_house_context = threading.local()
++
++_build = None
++_coordinates = None
++
++
++def _log(kind, **data):
++    import tyjokr_a11y_speech as speech
++    import json
++    speech.log_line('build helpers: ' + json.dumps(dict(kind=kind, **data), sort_keys=True, default=str))
++
++
++def _state():
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_keys as keys
++    if not _build.in_build_mode() or keys.blocking_active() or keys._editing_active:
++        raise RuntimeError('Close the game dialog before changing floors')
++    lot = services.active_lot()
++    if lot is None: raise RuntimeError('No active lot')
++    floor = None  # Camera position is not a native floor number.
++    return {'zone': int(services.current_zone_id()), 'floor': floor,
++            'center': (float(lot.center.x), float(lot.center.z)),
++            'grid': bool(grid.build_cursor()), 'owner': bool(keys._build_grid_owner)}
++
++
++def _same_world(state):
++    import services
++    import tyjokr_a11y_keys as keys
++    return (_build.in_build_mode() and int(services.current_zone_id()) == state['zone']
++            and not keys.blocking_active() and not keys._editing_active)
++
++
++def _grid_message(message):
++    import tyjokr_a11y_grid as grid
++    grid._flash(message)
++
++
++def _grid_released():
++    import tyjokr_a11y_keys as keys
++    return not keys._build_grid_owner
++
++
++def _restore_grid(state):
++    import services
++    import tyjokr_a11y_grid as grid
++    if (state['grid'] and _build.in_build_mode() and
++            int(services.current_zone_id()) == state['zone'] and grid.build_cursor()):
++        grid._flash('A11yBuildGridOn')
++        return True
++    return False
++
++
++@contextlib.contextmanager
++def _floor_input(state):
++    u = _coordinates._api()
++    sent_off = False
++    try:
++        with _coordinates.physical_context(u):
++            geometry = _coordinates.window(u)
++            if state['grid'] or state['owner']:
++                # Only release native key ownership. Preserve the Python grid's
++                # tile, height, room focus, orientation and enabled setting.
++                sent_off = True
++                _build.on_main(_grid_message, 'A11yBuildGridOff')
++                # A fresh native request is an ordered UI round trip after Off.
++                # It does not move any cursor or click. Never inject a floor key
++                # before the native guard and script owner have both released.
++                _coordinates._measure(state['center'][0], state['center'][1], state['floor'])
++                deadline = time.monotonic() + 2.0
++                while not _build.on_main(_grid_released):
++                    if time.monotonic() >= deadline: raise RuntimeError('Grid ownership did not release')
++                    time.sleep(.02)
++                _log('floor-ownership-released', zone=state['zone'])
++            yield u, geometry
++    finally:
++        if sent_off:
++            restored = _build.on_main(_restore_grid, state)
++            _log('floor-ownership-restored', zone=state['zone'], restored=bool(restored))
++
++
++def _receive_floor(zone, sequence, status, current, minimum, maximum):
++    """Simulation-thread reply from the single native ControlPanel definer."""
++    global _floor_sequence
++    job = _floor_job
++    if job is None or job['done'].is_set() or str(zone) != str(job['zone']): return
++    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= _floor_sequence: return
++    _floor_sequence = sequence
++    if status != 'ok':
++        job['error'] = 'Native floor query: ' + str(status)
++    elif (any(isinstance(v, bool) or not isinstance(v, int) for v in (current, minimum, maximum))
++          or not -64 <= minimum <= current <= maximum <= 64):
++        job['error'] = 'Invalid native floor bounds'
++    else:
++        job['result'] = {'floor': current, 'minimum': minimum, 'maximum': maximum}
++    job['done'].set()
++
++
++def _native_floor(state, timeout=3.0):
++    """One outstanding read-only query; quarantine after timeout, never reuse late replies."""
++    global _floor_job, _floor_quarantined
++    if _floor_quarantined: raise RuntimeError('Native floor channel timed out; restart the game before retrying')
++    if not _floor_lock.acquire(False): raise RuntimeError('Another native floor query is active')
++    try:
++        job = {'zone': state['zone'], 'done': threading.Event()}
++        _floor_job = job
++        def send():
++            if not _same_world(state): raise RuntimeError('Build context changed before the native query')
++            _build._send_ui('A11yNativeFloorQuery')
++            return True
++        if _build.on_main(send) is not True:
++            _floor_quarantined = True
++            raise RuntimeError('Native floor query could not be dispatched')
++        if not job['done'].wait(timeout):
++            _floor_quarantined = True
++            raise RuntimeError('Native floor UI did not answer; install the matching UI package')
++        if 'error' in job: raise RuntimeError(job['error'])
++        if not _build.on_main(_same_world, state): raise RuntimeError('Build context changed during the native query')
++        return job['result']
++    finally:
++        _floor_job = None
++        _floor_lock.release()
++
++
++def set_floor(level):
++    """Use BBGetLevelInfo, never camera height, to verify native floor keys."""
++    try:
++        if isinstance(level, bool) or not isinstance(level, (int, float)) or not math.isfinite(level) or int(level) != level:
++            return False
++        level = int(level)
++    except (ValueError, OverflowError):
++        return False
++    try:
++        state = _build.on_main(_state)
++        if state is None: raise RuntimeError('Simulation thread did not answer')
++        info = _native_floor(state)
++        state['floor'] = info['floor']
++        _log('floor-query', wanted=level, **info)
++        if not info['minimum'] <= level <= info['maximum']:
++            _log('floor-out-of-range', wanted=level, **info)
++            return False
++        if state['floor'] == level: return True
++        with _floor_input(state) as (u, geometry):
++            for _ in range(abs(level - state['floor'])):
++                if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
++                    raise RuntimeError('Game focus, window or Build context changed')
++                if not _build.on_main(_grid_released): raise RuntimeError('The grid reclaimed the floor keys')
++                if any(u.GetAsyncKeyState(key) & 0x8000 for key in (16,17,18,91,92)):
++                    raise RuntimeError('Release modifier keys before changing floors')
++                current = _native_floor(state)['floor']
++                if current == level: return True
++                step = 1 if current < level else -1
++                key, scan = (33, 0x49) if step > 0 else (34, 0x51)
++                if (not _build.on_main(_same_world, state) or _coordinates.window(u) != geometry
++                        or u.GetAsyncKeyState(key) & 0x8000):
++                    raise RuntimeError('Input context changed before the floor key')
++                pressed = False
++                try:
++                    u.keybd_event(key, scan, 1, 0); pressed = True
++                    time.sleep(.05)
++                finally:
++                    if pressed: u.keybd_event(key, scan, 3, 0)
++                actual = current
++                # Wait for one key acknowledgement; never stack unacknowledged keys.
++                for poll in range(30):
++                    time.sleep(.1)
++                    if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
++                        raise RuntimeError('Build context changed while waiting for the floor')
++                    actual = _native_floor(state)['floor']
++                    if actual != current: break
++                _log('floor-step', wanted=level, before=current, actual=actual, source='BBGetLevelInfo')
++                if actual != current + step: return False
++                if actual == level: return True
++            return False
++    except Exception as exc:
++        _log('floor-refused', wanted=level, error=str(exc))
++        return False
++
++
++def _house_build(plan):
++    """Scope stacked stairs to the running plan, even after a failed room."""
++    planner = _planner
++    if planner is None: return _original_house_build(plan)
++    _house_context.transitions = tuple(getattr(plan, '_a11y_transitions', ()))
++    planner._pending_stairs = []
++    try:
++        return _original_house_build(plan)
++    finally:
++        planner._pending_stairs = []
++        _house_context.transitions = ()
++
++
++def _stairs_for_plan(top, climb):
++    planner = _planner
++    transitions = getattr(_house_context, 'transitions', ())
++    if planner is None or not transitions: return _original_house_stairs(top, climb)
++    for stair_top, stair_climb, lower, upper in transitions:
++        result = planner._place_stair_at(stair_top, stair_climb, lower)
++        _log('stair-transition', lower=lower, upper=upper, result=result)
++        if result is not True: return result
++    return True
++
++
++def _build_menu():
++    import tyjokr_a11y_plus_build as build
++    return build.open_menu()
++
++
++def install():
++    global _build, _coordinates, _original_house_build, _original_house_stairs, _planner
++    import tyjokr_a11y_plus_build as build
++    import tyjokr_a11y_plus_core as core
++    import tyjokr_a11y_build_coordinates as coordinates
++    if getattr(build, '_helper_integration_installed', False): return
++    import sims4.commands
++    import tyjokr_a11y_plus_house as house
++    def receive(zone: str='', sequence: int=0, status: str='', current: int=0, minimum: int=0, maximum: int=0, _connection=None):
++        _receive_floor(zone, sequence, status, current, minimum, maximum)
++    sims4.commands.Command('a11y.floor_native', command_type=sims4.commands.CommandType.Live)(receive)
++    try:
++        import tyjokr_a11y_house_planner as planner
++    except ImportError:
++        planner = None
++    _planner = planner
++    _original_house_stairs = planner._original_stairs if planner is not None else house.place_stairs_worker
++    _original_house_build = house._build
++    house._build = _house_build
++    house.place_stairs_worker = _stairs_for_plan
++    _build, _coordinates = build, coordinates
++    build.set_floor = set_floor
++    # Roof tools registered Alt+B before the detached wrapper loaded. Resolve
++    # the final menu when invoked, so every later wrapper is included once.
++    current = core.HOTKEYS.get(ord('B'))
++    if current is not None:
++        core.HOTKEYS[ord('B')] = (_build_menu, current[1])
++    build._helper_integration_installed = True
++    _log('installed')
+diff --git a/Scripts/tyjokr_a11y_event_goals.py b/Scripts/tyjokr_a11y_event_goals.py
+new file mode 100644
+index 0000000..caac7ca
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_event_goals.py
+@@ -0,0 +1,75 @@
++"""Open the selected running event's native goal HUD, without acting on goals."""
++import time
++import threading
++
++_serial = 0
++_pending = None
++_registered = False
++
++
++def _log(message):
++    import tyjokr_a11y_speech as speech
++    speech.log_line('event goals: '+message)
++
++
++def _unavailable():
++    import tyjokr_a11y_lang as lang
++    import tyjokr_a11y_speech as speech
++    speech.speak(lang.t('event goals unavailable'),explicit=True)
++
++
++def _expire(serial):
++    global _pending
++    if _pending is None or _pending['serial']!=serial: return
++    job=_pending
++    _pending=None
++    import services
++    if int(services.current_zone_id())!=job['zone']:return
++    _log('native UI query timed out')
++    _unavailable()
++
++
++def receive(text=''):
++    global _pending
++    import services
++    import tyjokr_a11y_narrator as narrator
++    try:
++        parts=narrator._decode_percent(text).split('|')
++        if len(parts)!=3 or _pending is None:return False
++        job=_pending
++        if parts[0]!=str(job['serial']) or parts[1]!=str(job['zone']):return False
++        if int(services.current_zone_id())!=job['zone']:return False
++        _pending=None
++        if time.monotonic()>job['until']:return False
++        _log('native HUD status={} event={}'.format(parts[2],job['event']))
++        if parts[2]!='opened':_unavailable()
++        return parts[2]=='opened'
++    except Exception as exc:
++        _log('invalid native reply: '+str(exc));return False
++
++
++def _register():
++    global _registered
++    if _registered:return
++    import sims4.commands
++    @sims4.commands.Command('a11y.eventgoals_enc',command_type=sims4.commands.CommandType.Live)
++    def command(text: str='',_connection=None):return receive(text)
++    _registered=True
++
++
++def open_goals(situation_id):
++    global _serial,_pending
++    import services
++    import tyjokr_a11y_hub as hub
++    import tyjokr_a11y_pump as pump
++    manager,situation=hub._event(situation_id)
++    if situation is None:return False
++    _register()
++    _serial+=1
++    job={'serial':_serial,'zone':int(services.current_zone_id()),'event':int(situation_id),'until':time.monotonic()+4.0}
++    _pending=job
++    hub._ui('A11y|eventgoals|{}|{}|{}'.format(job['event'],job['zone'],job['serial']))
++    # The timer never touches game data; only the simulation pump may expire it.
++    timer=threading.Timer(4.1,lambda:pump.post(_expire,job['serial']))
++    timer.daemon=True;timer.start()
++    return True
+diff --git a/Scripts/tyjokr_a11y_house_workflow.py b/Scripts/tyjokr_a11y_house_workflow.py
+new file mode 100644
+index 0000000..3617689
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_house_workflow.py
+@@ -0,0 +1,282 @@
++"""Unified house planning and fresh Build-mode room geometry."""
++import copy
++import threading
++
++_build = None
++_core = None
++_house = None
++_planner = None
++_original_menu = None
++_original_scan = None
++_original_say = None
++_legacy_builder = None
++_main_ident = None
++ROLES = (('Bedroom','bedroom'),("Children's bedroom",'bedroom'),('Nursery','bedroom'),
++         ('Bathroom','bathroom'),('Kitchen','kitchen'),('Living room','living'),
++         ('Dining room','dining'),('Study','study'),('Storage','room'),('Hobby room','room'))
++
++
++def _log(kind, **data):
++    import json
++    import tyjokr_a11y_speech as speech
++    speech.log_line('house workflow: '+json.dumps(dict(kind=kind,**data),sort_keys=True,default=str))
++
++
++def _record_main():
++    global _main_ident
++    _main_ident = threading.get_ident()
++
++
++def _scan_main():
++    import services
++    lot = services.active_lot()
++    if lot is not None and _build.in_build_mode():
++        old = (getattr(lot,'_min_level',None),getattr(lot,'_max_level',None))
++        # Native Lot caches these properties until Zone.on_build_buy_exit.
++        # This only invalidates Python's two cached values, not the building.
++        lot.clear_cached_level_range()
++        fresh = (int(lot.min_level),int(lot.max_level))
++        if old != fresh: _log('room-floor-range', cached=old, fresh=fresh)
++    return _original_scan()
++
++
++def _scan_rooms():
++    if _main_ident is None: raise RuntimeError('The room-scan simulation thread is not ready')
++    if threading.get_ident() == _main_ident: return _scan_main()
++    result = _build.on_main(_scan_main)
++    if result is None: raise RuntimeError('The room-scan simulation thread did not answer')
++    return result
++
++
++def _context(plan):
++    import services
++    plan._a11y_zone = int(services.current_zone_id())
++    plan._a11y_household = int(services.active_household_id())
++    return plan
++
++
++def _valid(plan):
++    import services
++    return (_build.in_build_mode() and int(services.current_zone_id()) == plan._a11y_zone
++            and int(services.active_household_id()) == plan._a11y_household)
++
++
++def _floor(level):
++    return 'Basement' if level == -1 else 'Ground floor' if level == 0 else 'Floor {}'.format(level+1)
++
++
++def _position(plan, room):
++    level = room.get('level',0)
++    boxes = [r['box'] for r in plan.rooms if r.get('level',0)==level]
++    west,north,east,south = min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes)
++    a,b,c,d = room['box'];x,z=(a+c)/2.0,(b+d)/2.0
++    sides=[]
++    if z < (north+south)/2.0-.1: sides.append('north')
++    elif z > (north+south)/2.0+.1: sides.append('south')
++    if x < (west+east)/2.0-.1: sides.append('west')
++    elif x > (west+east)/2.0+.1: sides.append('east')
++    relation = 'connecting hallway' if room['kind']=='hall' else 'street-facing room' if room['uv'][1]==0 else 'rear room'
++    return '{}; {}; {}; {} by {} metres'.format(_floor(level),relation,' '.join(sides)+' side' if sides else 'center',c-a,d-b)
++
++
++def _door_names(plan):
++    for door in plan.doors:
++        level = door.get('level',0)
++        def owner(tile):
++            return next((r['name'] for r in plan.rooms if r.get('level',0)==level and r['box'][0]<=tile[0]<r['box'][2] and r['box'][1]<=tile[1]<r['box'][3]),None)
++        a,b=owner(door['tile_a']),owner(door['tile_b'])
++        if door['front'] and (a or b): door['what']='Front door into '+(a or b)
++        elif a and b: door['what']='Door between {} and {}'.format(a,b)
++
++
++def _extend(plan, stories, basement):
++    """Keep each existing floor template; repeat the highest template for additions."""
++    original = copy.deepcopy(plan)
++    templates={}
++    for room in original.rooms:
++        level=room.get('level',0)
++        templates.setdefault(level,[]).append(room)
++    if not templates or 0 not in templates: raise ValueError('The plan has no ground-floor template')
++    low,high=_planner._limits()
++    if isinstance(stories,bool) or not isinstance(stories,int) or not 1<=stories<=high+1:
++        raise ValueError('That story count is outside the native game limits')
++    if basement and low>=0: raise ValueError('The game does not allow a basement here')
++    levels=list(range(-1 if basement else 0,stories));p=copy.deepcopy(original);p.rooms=[];p.doors=[]
++    for level in levels:
++        source=level if level in templates else 0 if level<0 else max(v for v in templates if v>=0)
++        for room in templates[source]:
++            r=copy.deepcopy(room);r['level']=level
++            if source!=level:
++                base=room.get('_a11y_template_name',room['name'])
++                r['name']=_floor(level)+' '+base;r['_a11y_template_name']=base
++            p.rooms.append(r)
++        for door in original.doors:
++            if door.get('level',0)!=source or (door['front'] and level!=0): continue
++            d=copy.deepcopy(door);d['level']=level;p.doors.append(d)
++    p.floors=stories;p.stairs=None
++    halls=[r for r in p.rooms if r['level']==0 and r['kind']=='hall']
++    if len(levels)>1:
++        if len(halls)!=1 or p.width<5: raise ValueError('This layout has no verified straight-stair hallway')
++        hall=halls[0];top=(p.width-2,hall['uv'][1]);p.stairs={'top':top,'climb':(1,0)}
++    frame=_build.frame();along=frame.width if p.side in ('north','south') else frame.depth
++    _house._map_plan(p,frame,along)
++    p._a11y_transitions=[]
++    if p.stairs:
++        for lower in levels[:-1]:p._a11y_transitions.append((p.stairs['top_lot'],p.stairs['climb_lot'],lower,lower+1))
++    _door_names(p)
++    return p
++
++
++def _summary(plan):
++    levels=sorted({r.get('level',0) for r in plan.rooms})
++    counts=', '.join('{}: {} rooms'.format(_floor(level),sum(r['kind']!='hall' and r.get('level',0)==level for r in plan.rooms)) for level in levels)
++    return '{} by {} metres. Street-facing side: {}. {}. {} connecting stair runs.'.format(plan.width,plan.depth,plan.side,counts,len(getattr(plan,'_a11y_transitions',())))
++
++
++def _edit_rooms(plan):
++    rows=[(r['name'],_position(plan,r),i) for i,r in enumerate(plan.rooms)]+[('Back to house plan',None,None)]
++    def selected(index):
++        if index is None: _review(plan);return
++        room=plan.rooms[index]
++        options=[('Keep '+room['name'],_position(plan,room),None)]
++        if room['kind']!='hall':options += [(name,None,(name,kind)) for name,kind in ROLES]
++        options += [('Give this room a custom name','Changes the label; keeps its geometry and current room type.','custom')]
++        def changed(value):
++            if value=='custom':
++                def named(text):
++                    text=' '.join((text or '').split())[:60]
++                    if text:room['name']=text;room['_a11y_template_name']=text
++                    _door_names(plan);_edit_rooms(plan)
++                _core.ask_text('Name this room',_position(plan,room)+'. Type one room name. Leave blank to keep '+room['name']+'.','',named)
++                return
++            if value is not None:room['name'],room['kind']=value;room['_a11y_template_name']=room['name']
++            _door_names(plan);_edit_rooms(plan)
++        _core.choose('Room use and name',room['name']+'. '+_position(plan,room),options,changed,tag='build')
++    _core.choose('Rooms and positions','Select any room to choose its use or give it a custom name. Each room is edited separately.',rows,selected,tag='build')
++
++
++def _stories(plan):
++    low,high=_planner._limits()
++    def count_chosen(count):
++        options=[('No basement',None,False)]
++        if low<0:options.append(('One basement level','Experimental native basement drawing, checked before continuing.',True))
++        def below(value):
++            try:p=_extend(plan,count,value)
++            except ValueError as exc:_core.speak(str(exc));return
++            _review(p)
++        _core.choose('Basement','Keep the same perimeter below ground.',options,below,tag='build')
++    rows=[('{} above-ground {}'.format(n,'story' if n==1 else 'stories'),None,n) for n in range(1,high+2)]
++    _core.choose('Stories','Existing floor layouts are preserved. Extra stories repeat the highest floor layout; names can be changed separately.',rows,count_chosen,tag='build')
++
++
++def _review(plan):
++    if getattr(plan,'problem',None): _core.speak(plan.problem);return
++    if not _valid(plan):_core.speak('The lot or household changed. Open Build my house again.');return
++    estimate=_house.wall_meters(plan)*_house.WALL_PRICE+len(plan.doors)*100+len(getattr(plan,'_a11y_transitions',()))*_house.STAIR_PRICE
++    funds=_build.funds() or 0
++    rows=[('Build this house' if estimate<=funds else 'Estimated cost exceeds household funds',
++           'Uses the existing native construction and placement checks.', 'build' if estimate<=funds else None),
++          ('Rooms, positions and custom names','Choose each room separately; no comma-separated list.','rooms'),
++          ('Stories and basement','Repeat layouts without changing the perimeter.','stories'),('Cancel',None,None)]
++    def selected(action):
++        if action=='rooms':_edit_rooms(plan)
++        elif action=='stories':_stories(plan)
++        elif action=='build':
++            if not _valid(plan):_core.speak('The lot or household changed. Nothing was built.');return
++            if _build._busy[0]:_core.speak('Still working on the last build step.');return
++            _door_names(plan);plan._a11y_roof_prompt=True
++            _log('approved',summary=_summary(plan),rooms=[(r.get('level',0),r['kind'],r['name'],r['box']) for r in plan.rooms],stairs=getattr(plan,'_a11y_transitions',()))
++            _house.start_build(plan)
++    _core.choose('Build my house: review',_summary(plan)+' Estimated structural cost {:,}; household funds {:,}.'.format(estimate,funds),rows,selected,tag='build')
++
++
++def _preset(value):
++    try:
++        plan=_house.make_two_floor_plan(value[1]) if value[0]=='two' else _house.make_plan(list(value[1]))
++        if getattr(plan,'problem',None):_core.speak(plan.problem);return
++        # Also creates an explicit stair scope for the existing two-floor presets.
++        plan=_extend(plan,plan.floors,False)
++        _review(_context(plan))
++    except Exception as exc:
++        _log('plan-failed',error=str(exc));_core.speak('The house plan could not be prepared. '+str(exc))
++
++
++def _custom():
++    sizes=[('Compact square','10 by 10 metres.',(10,10)),('Standard rectangle','10 by 11 metres.',(10,11)),('Large rectangle','12 by 14 metres.',(12,14))]
++    def size_chosen(size):
++        def layout_chosen(layout):
++            defaults=['Living room','Kitchen','Bedroom','Bathroom'] if layout=='four' else ['Living room','Bedroom']
++            plan=_planner._build_plan(size[0],size[1],[0],layout,{0:defaults})
++            if getattr(plan,'problem',None):_core.speak(plan.problem);return
++            _stories(_context(plan))
++        rows=[('Front and back rooms','One street-facing room, a hallway and one rear room per floor.','two'),
++              ('Four rooms around a hallway','Two street-facing rooms and two rear rooms per floor.','four')]
++        _core.choose('Room layout','The footprint stays aligned between floors. Review every room by its actual compass position afterward.',rows,layout_chosen,tag='build')
++    _core.choose('House footprint','Choose the rectangular perimeter.',sizes,size_chosen,tag='build')
++
++
++def _ready_made():
++    rows=[(label,None,('one',list(kinds))) for label,kinds in _house.PRESETS]
++    rows += [(label,None,('two',variant)) for label,variant in _house.TWO_FLOOR_PRESETS]
++    _core.choose('Ready-made house layouts','Preserves the original room dimensions and door geometry. Stories, basement and room names can be adjusted in the review.',rows,_preset,tag='build')
++
++
++def _legacy_plan(kinds):
++    _preset(kinds if isinstance(kinds,tuple) else ('one',kinds))
++
++
++def open_builder():
++    if not _build.in_build_mode():_core.speak('Enter Build mode first.');return
++    rows=[('Start with a ready-made layout','Original one- and two-story presets, with a common review and customization flow.',_ready_made),
++          ('Design a square or rectangular house','Choose footprint, front/back or four-room layout, stories and basement.',_custom),
++          ('Choose the room list yourself','Original one-floor room-list planner, using the same review.',lambda:_house._custom([]))]
++    _core.choose('Build my house','One house builder: choose a starting layout, then review room positions, names, stories and basement before building.',rows,lambda fn:fn(),tag='build')
++
++
++def _open_menu():
++    choose=_core.choose
++    def extended(title,prompt,rows,callback,tag=None,*args,**kwargs):
++        if title=='Build helper':
++            output=[];added=False
++            for row in rows:
++                if row[0] in ('Build my house','Configurable stacked house'):
++                    if not added:output.append(('Build my house','Ready-made or custom layouts, stories, basement and individual room names.',open_builder));added=True
++                else:output.append(row)
++            if not added:output.append(('Build my house','Ready-made or custom layouts, stories, basement and individual room names.',open_builder))
++            rows=output
++        return choose(title,prompt,rows,callback,tag,*args,**kwargs)
++    _core.choose=extended
++    try:return _original_menu()
++    finally:_core.choose=choose
++
++
++def _say(text):
++    import tyjokr_a11y_basement as basement
++    reason=basement.failure_reason()
++    if reason and text.startswith('I stopped building at the '):
++        return _original_say('Basement construction stopped: '+reason+'. No further rooms were attempted. Inspect the result before using Undo or trying again.')
++    return _original_say(text)
++
++
++def install():
++    global _build,_core,_house,_planner,_original_menu,_original_scan,_legacy_builder,_original_say
++    import tyjokr_a11y_plus_build as build
++    import tyjokr_a11y_plus_core as core
++    import tyjokr_a11y_plus_house as house
++    import tyjokr_a11y_plus_rooms as rooms
++    try:
++        import tyjokr_a11y_house_planner as planner
++    except ImportError:
++        return
++    if getattr(build,'_house_workflow_installed',False):return
++    _build,_core,_house,_planner=build,core,house,planner
++    _original_scan=rooms.scan_rooms;rooms.scan_rooms=_scan_rooms
++    core.post(_record_main)
++    # The pump may discard old queued work during loading. Its ticker also
++    # records the owner, and follows any later simulation-thread change.
++    core.add_ticker(.1,_record_main)
++    _original_menu=build.open_menu;build.open_menu=_open_menu
++    _original_say=house._say;house._say=_say
++    _legacy_builder=house.build_my_house;house.build_my_house=open_builder;house._show_plan=_legacy_plan
++    build._house_workflow_installed=True
++    _log('installed')
+diff --git a/Scripts/tyjokr_a11y_hub.py b/Scripts/tyjokr_a11y_hub.py
+index 1c63fc7..170547b 100644
+--- a/Scripts/tyjokr_a11y_hub.py
++++ b/Scripts/tyjokr_a11y_hub.py
+@@ -27,6 +27,7 @@ PANELS = (
+     ('social groups', 'OpenSimInfoClubPanel'),
+     ('owned businesses', 'OpenHouseholdInfoVenuePanel'),
+     ('calendar', 'ShowCalendar'),
++    ('photography controls', 'A11yPhotography'),
+ )
+ 
+ 
+@@ -592,7 +593,9 @@ def event_actions(situation_id):
+     manager, situation = _event(situation_id)
+     if situation is None:
+         return False
+-    rows = [(menu._raw(lang.t('send guests home and end event')), None,
++    rows = [(menu._raw(lang.t('current event goals')), None,
++             lambda: event_goals(situation_id)),
++            (menu._raw(lang.t('send guests home and end event')), None,
+              lambda: end_event(situation_id, send_home=True, end=True)),
+             (menu._raw(lang.t('end event')), None,
+              lambda: end_event(situation_id, send_home=False, end=True)),
+@@ -602,6 +605,11 @@ def event_actions(situation_id):
+                    localized_title=getattr(situation, 'display_name', None))
+ 
+ 
++def event_goals(situation_id):
++    import tyjokr_a11y_event_goals as goals
++    return goals.open_goals(situation_id)
++
++
+ def end_event(situation_id, send_home, end):
+     manager, situation = _event(situation_id)
+     if situation is None:
+diff --git a/Scripts/tyjokr_a11y_lang.py b/Scripts/tyjokr_a11y_lang.py
+index f4d0dde..0f3303b 100644
+--- a/Scripts/tyjokr_a11y_lang.py
++++ b/Scripts/tyjokr_a11y_lang.py
+@@ -1153,6 +1153,11 @@ _TRANSLATIONS['scanner unavailable'] = {
+ }
+ 
+ 
++_TRANSLATIONS['photography controls'] = {'en': 'Photography controls', 'de': 'Fotosteuerung'}
++_TRANSLATIONS['current event goals'] = {'en': 'Current event goals', 'de': 'Aktuelle Veranstaltungsziele'}
++_TRANSLATIONS['event goals unavailable'] = {'en': 'Goals are not available for this event right now.', 'de': 'Die Ziele dieser Veranstaltung sind gerade nicht verfügbar.'}
++
++
+ def _detect_lang():
+     """Language prefix from the connected client's account locale."""
+     global _locale_lang
+diff --git a/contrib-reference/modules/tyjokr_a11y_contrib.py b/contrib-reference/modules/tyjokr_a11y_contrib.py
+index be41ec4..a58b61e 100644
+--- a/contrib-reference/modules/tyjokr_a11y_contrib.py
++++ b/contrib-reference/modules/tyjokr_a11y_contrib.py
+@@ -459,6 +459,26 @@ def install():
+         import tyjokr_a11y_detached
+     except Exception as ex:
+         _log("detached structure planner did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_build_coordinates
++        tyjokr_a11y_build_coordinates.install()
++    except Exception as ex:
++        _log("measured build coordinates did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_build_helpers
++        tyjokr_a11y_build_helpers.install()
++    except Exception as ex:
++        _log("build helper integration did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_basement
++        tyjokr_a11y_basement.install()
++    except Exception as ex:
++        _log("experimental basement adapter did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_house_workflow
++        tyjokr_a11y_house_workflow.install()
++    except Exception as ex:
++        _log("unified house workflow did not load: {!r}".format(ex))
+     _log("narrow contribution layer installed")
+ 
+ 
+diff --git a/docs/development/audits/requested-ui-2026-11-09.md b/docs/development/audits/requested-ui-2026-11-09.md
+new file mode 100644
+index 0000000..1ca15ca
+--- /dev/null
++++ b/docs/development/audits/requested-ui-2026-11-09.md
+@@ -0,0 +1,14 @@
++# Requested screens and proactive navigation fixes
++
++Game 1.129.39.1030; native UI SHA256 6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83.
++
++| Screen | Change | Evidence |
++| --- | --- | --- |
++| Social Bunny | Keep readable posts/contacts and expose visible native message, remove, friend and reaction buttons with author/post context. | Native class inspection and production-method fixtures, including nested direct messages. |
++| Running event goals | Events → selected event → Current event goals focuses its native goal HUD; stale event/zone scopes expire. | Native SituationDisplay identifiers and public panel method; identity, modal and cleanup fixtures. |
++| Book-style text dialogs | Traverse native title/description row wrappers to their real input fields and existing footer. | Native TextInputCellView/InlineTextInputCellView and field/footer fixture. Native validation is retained. |
++| Photography | Panels → Photography controls focuses an already open camera; native selected filters are announced. | Native SimCamera controls, selected-state and modal/closed-camera fixtures. |
++| Wedding venue | Announce native selected state after activation. | Native LocationCellView.Selected and settled-readback checks. Selection failure itself is not established from static inspection. |
++| Clubs, Gallery subscriptions, rental units, household cards | Expose visible native child actions hidden behind readable card wrappers. | Exact native class/field inspection and one fixture for each family. |
++
++No game interactions were performed by these checks. In-game confirmation remains required for the reported book, photography and wedding scenarios. Unrelated screens retain the existing traversal. All shared TooltipManager definitions are rebuilt together for standard and UI Cheats packages.
+diff --git a/docs/development/changes/basement-adapter.md b/docs/development/changes/basement-adapter.md
+new file mode 100644
+index 0000000..4b42dc8
+--- /dev/null
++++ b/docs/development/changes/basement-adapter.md
+@@ -0,0 +1,7 @@
++# Experimental basement adapter
++
++- Add native Basement Tool drawing from floor 0, verified as a complete new rectangle on floor -1. Reject overlaps, changed prior room geometry and unverified results; restore Room Tool before continuing.
++- Route basement rooms in existing house plans through this adapter; ordinary floor workers remain delegated. Add Alt+B basement assistant for a standalone room or read-only native floor/room diagnostics.
++- Register experimental_basement in the existing config and accessible settings menu. Preserve stored choices.
++
++Code: Scripts/tyjokr_a11y_basement.py; bootstrap hook at the end of contrib-reference/modules/tyjokr_a11y_contrib.py install(). Controls: CONTROLS.txt. Tests: tools/test_basement_adapter.py.
+diff --git a/docs/development/changes/build-helper-integration.md b/docs/development/changes/build-helper-integration.md
+new file mode 100644
+index 0000000..ccb182a
+--- /dev/null
++++ b/docs/development/changes/build-helper-integration.md
+@@ -0,0 +1,8 @@
++# Build helper integration
++
++- `Scripts/tyjokr_a11y_build_helpers.py`: release native grid key ownership for a floor change, confirm the ordered UI round trip and owner release, inject one native floor key at a time with focus/context/modifier checks, verify the reported floor and restore ownership in `finally`. Grid tile, facing, height and enabled state are preserved.
++- Alt+B resolves the current `build.open_menu` at invocation, retaining the detached-structure wrapper installed after roof tools.
++- `contrib-reference/modules/tyjokr_a11y_contrib.py`: install the separate helper adapter after measured coordinates.
++- `tools/test_build_helpers.py`: key ownership/acknowledgement, multiple floors, abort/release paths, unchanged floor, invalid input and late menu wrappers.
++
++Live evidence: 2026-11-09 23:22, the game verified all five ground-floor room footprints. The three upper-floor attempts were intercepted as Build-grid floor-up commands; native construction stopped with incomplete second-floor rooms. The new adapter addresses input ownership; in-game verification pending.
+diff --git a/docs/development/changes/graphics-option-labels.md b/docs/development/changes/graphics-option-labels.md
+new file mode 100644
+index 0000000..48f9ce1
+--- /dev/null
++++ b/docs/development/changes/graphics-option-labels.md
+@@ -0,0 +1,7 @@
++# Graphics option labels
++
++`flash/TooltipManager_patched.as`: `A11yGraphicsRowLabel` pairs the twelve native `dd*` dropdowns with their localized `lb*` labels on GraphicsTab, DefaultGraphicsTab and MacGraphicsTab. `A11yOptionsRowLabel` calls it before existing row handling. `A11yCheckboxState` also recognizes the exact native `widgets.OptionsMenu::LeftLabelCheckBox` class and reads its Selected value. Values, popup choices, navigation and setting activation are preserved.
++
++Evidence: live log 2026-11-09 21:47-21:48 read unnamed Low/High/Custom values. Current native GraphicsTab.ConfigUI sets the matching localized labels; Graphics uses standalone controls rather than OptionsCellView rows.
++
++`tools/test_options_simplified.js`: Windows/Mac labels, nested value focus, disabled controls, hidden/missing labels, popup choices, checkboxes and unrelated tabs. 19 checks pass offline. Live verification pending.
+diff --git a/docs/development/changes/measured-build-coordinates.md b/docs/development/changes/measured-build-coordinates.md
+new file mode 100644
+index 0000000..a3f9870
+--- /dev/null
++++ b/docs/development/changes/measured-build-coordinates.md
+@@ -0,0 +1,15 @@
++# Measured build coordinates
++
++- `Scripts/tyjokr_a11y_build_coordinates.py`: separate coordinate/input boundary. Native probe supplies stage dimensions, scale mode/alignment, layout bounds and world projection; maps UI -> client -> screen once in a scoped per-monitor worker DPI context. Uses live client origin/size and virtual-desktop bounds, not Options.ini or a fixed resolution. Context is restored on all paths.
++- Existing click/drag helpers are retained. Wrapped input checks focus, geometry/DPI/style, native Build Mode/dialog state and physical pointer arrival before mouse-down; aborts release only helper-owned mouse state. Shift cleanup is protected on errors. Mode/focus/resize changes interrupt a drag. Parking remains inside the current game client and never affects an unfocused window.
++- `contrib-reference/modules/tyjokr_a11y_contrib.py`: installs the adapter after the other contribution modules.
++- `flash/TooltipManager_patched.as`: independent `A11yCoordinate*` marker, frame callback/cleanup and one `coords` encoded route. Reports `a11y.coords_enc`; never enables/moves a virtual cursor or confirms placement. Existing Build cursor paths are unchanged.
++- `tools/test_build_coordinates.py` / `test_coordinate_probe.js`: resolution/DPI/origin/style matrix, standard stage fit modes, input fences/cleanup, stale replies, no-action preflight and native marker lifecycle. CHEATS.txt: `a11y.buildcoords [delay]`.
++
++Evidence: live Windows capture was 2880x1800 at 200%, while the installed builder divided it to 1440x900. Cursor positions and explicit Windows physical conversion agreed. The successful 22:48 live probe confirmed native stage/layout/client dimensions of 2880x1800, noScale, alignment LT, and projection (1389.65,1231.64) mapping directly to physical (1390,1232). The installed planner lacked the checkout's earlier coordinate overrides; this adapter is explicitly wired into the deployed contribution loader.
++
++Stage fit semantics follow the [AIR/AS3 Stage scale-mode contract](https://airsdk.dev/docs/development/display/display-programming/working-with-display-objects/setting-stage-properties). UI scale is already represented by the native display transform; no extra UI/DPI percentage is applied. Unknown modes and cropped/out-of-window points are refused. Alignment is used only for uniform showAll/noBorder fitting; these modes accept either axis order and reject unknown alignment. Raw native replies are logged before validation.
++
++Live sequence: in Build Mode enable logging, run `a11y.buildcoords 5`, close the console, wait up to eight seconds. Inspect `build coordinates: preflight` and `measure` before testing a helper against a backed-up save. Compare planned and game-created room footprints. Read-only projection alone does not prove actual drawing succeeded.
++
++Rollback: restore the previous paired script/UI packages or reverse the source patch and remove the coordinate module/loader hook.
+diff --git a/docs/development/changes/native-floor-and-stair-isolation.md b/docs/development/changes/native-floor-and-stair-isolation.md
+new file mode 100644
+index 0000000..fb93945
+--- /dev/null
++++ b/docs/development/changes/native-floor-and-stair-isolation.md
+@@ -0,0 +1,8 @@
++# Native floors and isolated stair plans
++
++- Build helpers verify floor changes using the game's BBGetLevelInfo (current/minimum/maximum), rather than inferring a floor from camera height. One key is acknowledged before another is sent; out-of-range floors and unanswered queries stop construction.
++- Stair transitions belong to the running house plan and are cleared on every exit. Failed stacked/basement plans cannot change the stairs in a later ordinary house.
++
++Changed code: Scripts/tyjokr_a11y_build_helpers.py (native query transport, set_floor, house/stair wrappers, install); flash/extra-classes/ControlPanel.as (one read-only message listener and A11yNativeFloorQuery, next to RefreshFloorData).
++
++Only the helper bytecode and GameTray UI resource change. UI Cheats compatibility is unchanged. Live confirmation of complete door/stair placement is pending.
+diff --git a/docs/development/changes/unified-house-workflow.md b/docs/development/changes/unified-house-workflow.md
+new file mode 100644
+index 0000000..51ce8b6
+--- /dev/null
++++ b/docs/development/changes/unified-house-workflow.md
+@@ -0,0 +1,7 @@
++# Unified house workflow and basement verification
++
++- Add one Build my house entry covering original presets, square/rectangular front/back or four-room layouts, and the original room-list planner. Common review supports aligned stories, optional basement, individual room types/names and actual compass positions. Preserve native room/door geometry and the construction workers.
++- Refresh the native Lot floor-range cache before Build-mode room scans; marshal worker scans through the simulation pump. This prevents cached floor-zero bounds from hiding a new basement or story.
++- Reconfirm Basement Tool after camera preparation; log native floor bounds and funds after drawing. Replace the misleading generic wrong-size message for a failed basement step.
++
++Code: Scripts/tyjokr_a11y_house_workflow.py; targeted updates in Scripts/tyjokr_a11y_basement.py; final bootstrap hook in contrib-reference/modules/tyjokr_a11y_contrib.py. Controls in CONTROLS.txt. Focused tests in tools/test_house_workflow.py and tools/test_basement_adapter.py.
+diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
+index 2bc9cbf..74940ef 100644
+--- a/flash/TooltipManager_patched.as
++++ b/flash/TooltipManager_patched.as
+@@ -302,6 +302,97 @@ package olympus.core
+          catch(e:Error) { this.A11yBuildUnbind(); this.A11yBuildReply(serial,"aimfailed"); }
+       }
+ 
++      // Independent read-only projection. Never enables/moves a cursor or
++      // confirms a tool; the Python coordinate adapter owns the response.
++      protected var mA11yCoordinateMarker:Sprite = null;
++      protected var mA11yCoordinateSerial:int = 0;
++      protected var mA11yCoordinateZone:String = "";
++      protected var mA11yCoordinateUntil:int = 0;
++      protected var mA11yCoordinateFrames:int = 0;
++
++      public function A11yCoordinateCancel() : void
++      {
++         var marker:Sprite = this.mA11yCoordinateMarker;
++         this.mA11yCoordinateMarker = null;
++         try
++         {
++            if(marker != null)
++            {
++               marker.removeEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame);
++               CommunicationManager.CallGameService("UnbindDisplayObject",{"displayObject":marker});
++            }
++         }
++         catch(e:Error) { }
++         try { if(marker != null && marker.parent != null) { marker.parent.removeChild(marker); } }
++         catch(removeError:Error) { }
++      }
++
++      public function A11yCoordinateReply(result:String, point:Point = null) : void
++      {
++         var serial:int = this.mA11yCoordinateSerial;
++         var zone:String = this.mA11yCoordinateZone;
++         try
++         {
++            var stage:Stage = this.mTooltipsLayer.stage;
++            var layout:Object = getDefinitionByName("olympus.gamepad.LayoutAPI");
++            var bounds:Rectangle = this.A11yBuildBounds();
++            this.A11yPostToPython("a11y.coords_enc",encodeURIComponent([
++               serial,zone,result,point != null ? point.x : "NaN",point != null ? point.y : "NaN",
++               stage.stageWidth,stage.stageHeight,stage.scaleMode,stage.align,
++               Number(layout["StageWidth"]),Number(layout["StageHeight"]),
++               bounds != null ? bounds.left : 0,bounds != null ? bounds.top : 0,
++               bounds != null ? bounds.right : 0,bounds != null ? bounds.bottom : 0].join("|")));
++         }
++         catch(e:Error) { }
++         this.A11yCoordinateCancel();
++      }
++
++      public function A11yCoordinateProbe(parts:Array) : void
++      {
++         if(parts.length != 8) { return; }
++         if(this.mA11yCoordinateMarker != null) { this.A11yCoordinateReply("cancelled"); }
++         this.mA11yCoordinateSerial = int(parts[2]);
++         this.mA11yCoordinateZone = String(parts[7]);
++         try
++         {
++            var x:Number = Number(parts[3]);
++            var y:Number = Number(parts[4]);
++            var z:Number = Number(parts[5]);
++            var level:Number = Number(parts[6]);
++            if(this.mA11yCoordinateSerial <= 0 || !isFinite(x) || !isFinite(y) || !isFinite(z) || !isFinite(level) || int(level) != level || Math.abs(x) > 100000 || Math.abs(y) > 100000 || Math.abs(z) > 100000) { return; }
++            if(!this.mA11yBuildControls || !this.mA11yKeyboard || this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || getTimer() > this.mA11yKeyboardLease) { this.A11yCoordinateReply("blocked"); return; }
++            if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("zonechanged"); return; }
++            var marker:Sprite = new Sprite();
++            marker.name = "A11yCoordinateProbe";
++            marker.mouseEnabled = false;
++            marker.mouseChildren = false;
++            marker.alpha = 0;
++            marker.x = -1000000;
++            marker.y = -1000000;
++            this.mA11yCoordinateMarker = marker;
++            this.mA11yCoordinateUntil = getTimer() + 1500;
++            this.mA11yCoordinateFrames = 0;
++            this.mTooltipsLayer.addChild(marker);
++            marker.addEventListener(Event.ENTER_FRAME,this.A11yCoordinateFrame,false,0,true);
++            CommunicationManager.CallGameService("BindDisplayObject",{"displayObject":marker,"worldOffset":{"x":x,"y":y,"z":z},"screenOffset":{"x":0,"y":0}});
++         }
++         catch(e:Error) { this.A11yCoordinateReply("error"); }
++      }
++
++      public function A11yCoordinateFrame(event:Event) : void
++      {
++         try
++         {
++            if(this.mA11yCoordinateMarker == null) { return; }
++            this.mA11yCoordinateFrames = this.mA11yCoordinateFrames + 1;
++            if(this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked() || !this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yCoordinateZone) { this.A11yCoordinateReply("blocked"); return; }
++            var point:Point = this.mA11yCoordinateMarker.localToGlobal(new Point(0,0));
++            if(this.mA11yCoordinateMarker.visible && isFinite(point.x) && isFinite(point.y) && Math.abs(point.x) < 999999 && Math.abs(point.y) < 999999) { this.A11yCoordinateReply("point",point); return; }
++            if(getTimer() > this.mA11yCoordinateUntil || this.mA11yCoordinateFrames >= 90) { this.A11yCoordinateReply("viewport"); }
++         }
++         catch(e:Error) { this.A11yCoordinateReply("error"); }
++      }
++
+       public function A11yBuildProjectionFrame() : void
+       {
+          var point:Point = null;
+@@ -3190,6 +3281,7 @@ package olympus.core
+          try
+          {
+             name = getQualifiedClassName(item);
++            if(name == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || name == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || name == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer") { return true; }
+             // Occult XP/points are not buttons. Retain one informational
+             // stop while the existing walker also exposes the native powers
+             // button. Match only EA's two known rows, not unrelated panels.
+@@ -3649,6 +3741,130 @@ package olympus.core
+          catch(e:Error) { this.mA11yActivating = false; }
+       }
+ 
++      protected var mA11yGoalContent:DisplayObject = null;
++      protected var mA11yGoalScope:DisplayObject = null;
++      protected var mA11yGoalId:String = "";
++      protected var mA11yGoalZone:String = "";
++      protected var mA11yGoalUntil:int = 0;
++      protected var mA11yGoalCheck:int = 0;
++      protected var mA11yGoalVisits:int = 0;
++
++      public function A11yEventGoalFind(item:DisplayObject, id:String, depth:int = 0) : DisplayObject
++      {
++         if(item == null || depth > 16 || this.mA11yGoalVisits >= 2048) { return null; }
++         this.mA11yGoalVisits = this.mA11yGoalVisits + 1;
++         try
++         {
++            if(getQualifiedClassName(item).indexOf("widgets.Gameplay.SituationDisplay.controls::") == 0 && "Id" in item && String(Object(item)["Id"]) == id) { return item; }
++            var parent:DisplayObjectContainer = item as DisplayObjectContainer;
++            var index:int = 0;
++            if(parent != null)
++            {
++               while(index < parent.numChildren)
++               {
++                  var found:DisplayObject = this.A11yEventGoalFind(parent.getChildAt(index),id,depth + 1);
++                  if(found != null) { return found; }
++                  index = index + 1;
++               }
++            }
++         }
++         catch(e:Error) { }
++         return null;
++      }
++
++      public function A11yEventGoalClear() : void
++      {
++         try { this.mTooltipsLayer.removeEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame); }
++         catch(e:Error) { }
++         if(this.mA11yGoalScope != null)
++         {
++            if(this.mA11yPendingScope == this.mA11yGoalScope) { this.mA11yPendingScope = null; }
++            if(this.mA11yStatusScope == this.mA11yGoalScope) { this.mA11yStatusScope = null; }
++            if(this.mA11yScope == this.mA11yGoalScope) { this.A11yClearFocus(); this.mA11yScope = null; }
++         }
++         this.mA11yGoalContent = null; this.mA11yGoalScope = null;
++         this.mA11yGoalId = ""; this.mA11yGoalZone = "";
++      }
++
++      public function A11yEventGoalFrame(event:Event) : void
++      {
++         var now:int = getTimer();
++         if(now < this.mA11yGoalCheck) { return; }
++         this.mA11yGoalCheck = now + 200;
++         try
++         {
++            if(this.mA11yGoalContent == null || this.mA11yStatusScope != this.mA11yGoalScope || !this.mA11yKeyboard || now > this.mA11yKeyboardLease || now > this.mA11yGoalUntil || !this.A11yIsLive(this.mA11yGoalContent) || (this.mA11yGoalId.length > 0 && String(Object(this.mA11yGoalContent)["Id"]) != this.mA11yGoalId) || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yGoalZone)
++            { this.A11yEventGoalClear(); }
++         }
++         catch(e:Error) { this.A11yEventGoalClear(); }
++      }
++
++      public function A11yEventGoals(parts:Array) : void
++      {
++         if(parts.length != 5) { return; }
++         var serial:String = String(parts[4]);
++         var zone:String = String(parts[3]);
++         var status:String = "unavailable";
++         try
++         {
++            this.A11yModalFrame();
++            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || this.A11yWorldHudMode() != 1 || this.mA11yActiveModalRoot != null) { status = "blocked"; }
++            else if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) == zone)
++            {
++               var root:DisplayObject = this.A11yLoadedWidget("SituationDisplay") as DisplayObject;
++               this.mA11yGoalVisits = 0;
++               var content:DisplayObject = this.A11yEventGoalFind(root,String(parts[2]));
++               if(this.A11yIsLive(root) && content != null && "mSituationGoalDisplay" in content)
++               {
++                  var ancestor:DisplayObject = content.parent;
++                  var depth:int = 0;
++                  while(ancestor != null && depth < 16)
++                  {
++                     if("OpenContentPanelWithId" in ancestor) { Object(ancestor)["OpenContentPanelWithId"](String(parts[2])); break; }
++                     ancestor = ancestor.parent; depth = depth + 1;
++                  }
++                  var goals:DisplayObject = Object(content)["mSituationGoalDisplay"] as DisplayObject;
++                  if(this.A11yIsLive(content) && goals != null && goals.visible)
++                  {
++                     this.A11yEventGoalClear();
++                     this.mA11yGoalContent = content; this.mA11yGoalScope = goals;
++                     this.mA11yGoalId = String(parts[2]); this.mA11yGoalZone = zone;
++                     this.mA11yGoalUntil = getTimer() + 300000; this.mA11yGoalCheck = 0;
++                     this.mA11yStatusScope = goals;
++                     this.A11yFocusInto(goals);
++                     this.mTooltipsLayer.addEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame,false,0,true);
++                     status = "opened";
++                  }
++               }
++            }
++         }
++         catch(e:Error) { status = "error"; }
++         // Running-event feature: this command is deliberately loaded-zone only.
++         this.A11yPostToPython("a11y.eventgoals_enc",encodeURIComponent(serial + "|" + zone + "|" + status));
++      }
++
++      public function A11yPhotography(param1:Object = null) : void
++      {
++         try
++         {
++            this.A11yModalFrame();
++            var camera:DisplayObject = this.A11yLoadedWidget("SimCamera") as DisplayObject;
++            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || !this.A11yIsLive(camera) || (this.mA11yActiveModalRoot != null && this.mA11yActiveModalRoot != camera && !this.A11yIsInside(camera,this.mA11yActiveModalRoot) && !this.A11yIsInside(this.mA11yActiveModalRoot,camera)))
++            {
++               this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); return;
++            }
++            this.A11yEventGoalClear();
++            this.mA11yGoalContent = camera; this.mA11yGoalScope = camera;
++            this.mA11yGoalId = "";
++            this.mA11yGoalZone = String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true));
++            this.mA11yGoalUntil = getTimer() + 300000; this.mA11yGoalCheck = 0;
++            this.mA11yStatusScope = camera;
++            this.A11yFocusInto(camera);
++            this.mTooltipsLayer.addEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame,false,0,true);
++         }
++         catch(e:Error) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
++      }
++
+       public function A11yWants(param1:Object = null) : void
+       {
+          var hub:Object = this.A11yLoadedWidget("SimHub");
+@@ -3961,6 +4177,7 @@ package olympus.core
+       public function A11yHandleEncoded(param1:String) : void
+       {
+          var _loc2_:Array = param1.split("|");
++         if(_loc2_[1] == "eventgoals" && _loc2_.length == 5) { this.A11yEventGoals(_loc2_); return; }
+          if(_loc2_[1] == "lotprice" && _loc2_.length == 4)
+          {
+             this.A11yLotRentalPrice(String(_loc2_[2]),String(_loc2_[3]));
+@@ -4007,6 +4224,7 @@ package olympus.core
+          }
+          if(_loc2_[1] == "buildhand" && _loc2_.length == 4 && _loc2_[2] == "drop") { this.A11yBuildHandDrop(String(_loc2_[3])); return; }
+          if(_loc2_[1] == "buildaim" && _loc2_.length == 8) { this.A11yBuildAim(_loc2_); return; }
++         if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }
+          if(_loc2_[1] == "build" && _loc2_.length == 4) { this.A11yBuildCommand(String(_loc2_[2]),int(_loc2_[3])); return; }
+          if(_loc2_[1] == "plus" && _loc2_.length >= 3) { this.A11yPlusHandle(_loc2_); return; }
+          if(_loc2_[1] == "keyup") { delete this.mA11yGuardHeld[int(_loc2_[2])]; return; }
+@@ -4313,6 +4531,7 @@ package olympus.core
+             CommunicationManager.AddMessageListenerByName("A11yInvItemActions",this.A11yInvItemActions,"A11yNarrator");
+             CommunicationManager.AddMessageListenerByName("A11yBuildGridOn",this.A11yBuildGridOnMsg,"A11yNarrator");
+             CommunicationManager.AddMessageListenerByName("A11yBuildGridOff",this.A11yBuildGridOffMsg,"A11yNarrator");
++            CommunicationManager.AddMessageListenerByName("A11yPhotography",this.A11yPhotography,"A11yNarrator");
+             CommunicationManager.AddMessageListenerByName("A11yWants",this.A11yWants,"A11yNarrator");
+             CommunicationManager.AddMessageListenerByName("A11yNeeds",this.A11yNeeds,"A11yNarrator");
+             CommunicationManager.AddMessageListenerByName("A11yToggle",this.A11yMsgToggle,"A11yNarrator");
+@@ -5001,6 +5220,37 @@ package olympus.core
+                return;
+             }
+          }
++         if(_loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || _loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || _loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
++         {
++            _loc6_ = param1.getBounds(param1.stage);
++            if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(param1) || this.A11yCanRevealOnStage(param1)) && this.A11yInListViewport(param1)) { param2.push(param1); }
++            return;
++         }
++
++         // Compound cards retain their readable row and expose only native
++         // child actions. No action is synthesized for Social Bunny text rows.
++         var childActions:Array = null;
++         if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
++         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView") { childActions = ["btnReaction","btnAddFriend","mcReactionsGrid"]; }
++         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView") { childActions = ["btnReaction","mcReactionsGrid"]; }
++         else if(_loc7_ == "widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView") { childActions = ["btnDetails","btnAction"]; }
++         else if(_loc7_ == "widgets.Exchange.Subscriptions.controls::SubscriptionCellView") { childActions = ["btnFollow","btnBlock","btnUnblock"]; }
++         else if(_loc7_ == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitCellView") { childActions = ["btnTravel","btnViewAgreement","btnFillVacancy"]; }
++         else if(_loc7_ == "widgets.GameEntry.HouseholdPanel.controls::HouseholdPanelCellView") { childActions = ["btnUserHH","btnDelete","btnStoryProgression"]; }
++         if(childActions != null)
++         {
++            _loc6_ = param1.getBounds(param1.stage);
++            if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(param1) || this.A11yCanRevealOnStage(param1)) && this.A11yInListViewport(param1)) { param2.push(param1); }
++            var childIndex:int = 0;
++            while(childIndex < childActions.length)
++            {
++               var childName:String = String(childActions[childIndex]);
++               if(childName in param1) { this.A11yCollectFocusables(Object(param1)[childName] as DisplayObject,param2,param3 + 1); }
++               childIndex = childIndex + 1;
++            }
++            return;
++         }
++
+          // Business employee cells (BusinessEmployeeManagement, used by
+          // retail stores and the WickedWhims strip club): a Sim to hire is
+          // the cell itself; a current employee's cell is disabled but holds
+@@ -6118,8 +6368,49 @@ package olympus.core
+          return null;
+       }
+ 
++      public function A11yGraphicsRowLabel(item:DisplayObject, result:Array) : void
++      {
++         var node:DisplayObject = item;
++         var depth:int = 0;
++         var name:String = "";
++         var suffix:String = "";
++         var control:DisplayObject = null;
++         var label:DisplayObject = null;
++         var text:String = "";
++         var fields:Array = ["DisplayType","Resolution","RefreshRate","SceneRes","SimQuality","ObjQuality","LightingQuality","ReflectionQuality","EdgeSmooth","VisualEffect","ViewDistance","VisualQuality"];
++         try
++         {
++            while(node != null && depth < 8)
++            {
++               name = getQualifiedClassName(node);
++               if(name == "widgets.OptionsMenu.controls.tabs::DefaultGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::MacGraphicsTab" || name == "widgets.OptionsMenu.controls.tabs::GraphicsTab")
++               {
++                  for each(suffix in fields)
++                  {
++                     if(("dd" + suffix) in node && ("lb" + suffix) in node)
++                     {
++                        control = Object(node)["dd" + suffix] as DisplayObject;
++                        label = Object(node)["lb" + suffix] as DisplayObject;
++                        if(this.A11yIsLive(control) && this.A11yIsLive(label) && this.A11yIsInside(item,control))
++                        {
++                           text = this.A11yJoinedText(label);
++                           if(text != null && text.length > 0) { result.unshift("-999998|0|" + text); }
++                           return;
++                        }
++                     }
++                  }
++                  return;
++               }
++               node = node.parent;
++               depth = depth + 1;
++            }
++         }
++         catch(e:Error) { }
++      }
++
+       public function A11yOptionsRowLabel(item:DisplayObject, result:Array) : void
+       {
++         this.A11yGraphicsRowLabel(item,result);
+          var node:DisplayObject = item;
+          var depth:int = 0;
+          var label:Object = null;
+@@ -6497,6 +6788,9 @@ package olympus.core
+          // grid. Only the child button emits EA's mainRowClick event; focus
+          // both it and visible serving buttons instead of the inert wrapper.
+          if(getQualifiedClassName(item) == "widgets.Pickers.controls.GridPicker::RowCellView") { return true; }
++         if(getQualifiedClassName(item) == "widgets.Gameplay.SocialMedia::SocialMediaMessageCellView") { return true; }
++         // Native dialog rows wrap the actual editable TextField.
++         if(getQualifiedClassName(item) == "widgets.Dialog.controls::TextInputCellView" || getQualifiedClassName(item) == "widgets.Dialog.controls::InlineTextInputCellView") { return true; }
+          // These rank rows wrap the real, game-validated ability buttons.
+          // Treating the CellView wrapper as a choice hides every power in
+          // the nested grids (including werewolf and fairy abilities).
+@@ -7604,6 +7898,12 @@ package olympus.core
+                this.A11yClearFocus();
+                return;
+             }
++            var readClass:String = getQualifiedClassName(_loc2_);
++            if(readClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaReactionCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
++            {
++               this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return;
++            }
++
+             if(this.A11yActionProxy(_loc2_) != _loc2_)
+             {
+                // A disabled proxied control (a child's calendar Add Event) used to
+@@ -7623,6 +7923,7 @@ package olympus.core
+             // A toggled picker row reads its new state through the existing
+             // settled reread (no new listener); EA applies the toggle this frame.
+             if(this.A11yPickerToggleCell(_loc2_)) { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
++            else if(getQualifiedClassName(_loc2_) == "widgets.Gameplay.SimCamera.controls::CameraFilterCellView" || getQualifiedClassName(_loc2_) == "widgets.Gameplay.SituationCreation.controls::LocationCellView") { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
+             this.mA11yActivating = false;
+             this.mA11yList = null;
+             if(confirm && this.mA11ySimplifiedMenus && this.A11yConfirmSinglePicker(_loc2_)) { this.mA11yFocusPending = null; return; }
+@@ -7733,11 +8034,12 @@ package olympus.core
+                return this.A11yCheckboxState(Object(param1.parent)["btnCheckBox"]);
+             }
+             _loc2_ = getQualifiedClassName(param1);
++            if(_loc2_ == "widgets.Gameplay.SimCamera.controls::CameraFilterCellView" || _loc2_ == "widgets.Gameplay.SituationCreation.controls::LocationCellView") { return Object(param1)["Selected"] == true ? "checked" : "unchecked"; }
+             if(this.A11yPickerToggleCell(param1))
+             {
+                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
+             }
+-            if(_loc2_.indexOf("Checkbox") >= 0)
++            if(_loc2_.indexOf("Checkbox") >= 0 || _loc2_ == "widgets.OptionsMenu::LeftLabelCheckBox")
+             {
+                _loc5_ = param1;
+                if(_loc5_.Selected == true)
+@@ -8144,6 +8446,36 @@ package olympus.core
+                if("txtRestartRequiredLabel" in param1) { this.A11yCollectText(Object(param1)["txtRestartRequiredLabel"] as DisplayObject,_loc2_,0,param7); }
+             }
+             if(param6 == "a11y.widget_enc" || param6 == "a11y.focus_enc") { this.A11yRentalQuote(param1,_loc2_); this.A11yMoveInQuote(param1,_loc2_); this.A11yTransferQuote(param1,_loc2_); this.A11yMoveLabel(param1,_loc2_); this.A11yOptionsRowLabel(param1,_loc2_); }
++            if(param6 == "a11y.widget_enc" || param6 == "a11y.focus_enc")
++            {
++               var socialParent:DisplayObject = param1.parent;
++               if(socialParent != null)
++               {
++                  var socialClass:String = getQualifiedClassName(socialParent);
++                  if(socialClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || socialClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || socialClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView")
++                  {
++                     if("txtSimName" in socialParent && Object(socialParent)["txtSimName"] != null) { _loc2_.push("-999998|0|" + String(Object(socialParent)["txtSimName"].text)); }
++                     if("txtPostContent" in socialParent && Object(socialParent)["txtPostContent"] != null) { _loc2_.push("-999997|0|" + String(Object(socialParent)["txtPostContent"].text).substr(0,240)); }
++                  }
++               }
++            }
++
++            if(param1 is TextField && TextField(param1).type == "input")
++            {
++               var inputParent:DisplayObject = param1.parent;
++               var inputDepth:int = 0;
++               while(inputParent != null && inputDepth < 6)
++               {
++                  var inputClass:String = getQualifiedClassName(inputParent);
++                  if(inputClass == "widgets.Dialog.controls::TextInputCellView" || inputClass == "widgets.Dialog.controls::InlineTextInputCellView")
++                  {
++                     if("txtLabel" in inputParent && Object(inputParent)["txtLabel"] != null) { _loc2_.push("-999999|0|" + String(Object(inputParent)["txtLabel"].text)); }
++                     break;
++                  }
++                  inputParent = inputParent.parent; inputDepth = inputDepth + 1;
++               }
++            }
++
+             _loc7_ = this.A11yMapLabel(param1);
+             if(_loc7_.length > 0) { _loc2_ = ["0|0|" + _loc7_]; }
+             if("A11yMotiveText" in param1) { _loc2_ = ["0|0|" + Object(param1)["A11yMotiveText"]()]; }
+diff --git a/flash/extra-classes/ControlPanel.as b/flash/extra-classes/ControlPanel.as
+index 2ba5d47..b8640e5 100644
+--- a/flash/extra-classes/ControlPanel.as
++++ b/flash/extra-classes/ControlPanel.as
+@@ -394,6 +394,7 @@ package widgets.GameTray.controls
+          CommunicationManager.AddMessageListener("A11yTravelResult",this.A11yHandleTravelResult,this);
+          CommunicationManager.AddMessageListener("GoToShare",this.HandleGoToShare,this);
+          CommunicationManager.AddMessageListener("RefreshModeControl",this.HandleRefreshModeControl,this);
++         CommunicationManager.AddMessageListener("A11yNativeFloorQuery",this.A11yNativeFloorQuery,this);
+          CommunicationManager.AddMessageListener("BBRefreshLevelData",this.RefreshFloorData,this);
+          CommunicationManager.AddMessageListener("BBUpdateWallViewMode",this.RefreshWallData,this);
+          CommunicationManager.AddMessageListener("ShowCameraControl",this.HandleShowCameraControl,this);
+@@ -2131,6 +2132,46 @@ package widgets.GameTray.controls
+          this.mbIgnoreBuildBuyLockUnlock = CommunicationManager.CallGameService("IsForceFreeBuild",null,true) as Boolean;
+       }
+       
++      // Read-only: the same authoritative data used by RefreshFloorData.
++      protected var mA11yFloorQuerySequence:int = 0;
++
++      public function A11yNativeFloorQuery(param1:Object = null) : void
++      {
++         this.mA11yFloorQuerySequence = this.mA11yFloorQuerySequence + 1;
++         var status:String = "unavailable";
++         var zone:String = "0";
++         var current:int = 0;
++         var minimum:int = 0;
++         var maximum:int = 0;
++         try
++         {
++            zone = String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true));
++            if(this.mGameState == GameStates.BUILD && !GameStateFlags.IsBetweenStates)
++            {
++               var info:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
++               if(info != null && info.hasOwnProperty("curLevel") && info.hasOwnProperty("minLevel") && info.hasOwnProperty("maxLevel"))
++               {
++                  var c:Number = Number(info["curLevel"]);
++                  var lo:Number = Number(info["minLevel"]);
++                  var hi:Number = Number(info["maxLevel"]);
++                  if(typeof info["curLevel"] == "number" && typeof info["minLevel"] == "number" && typeof info["maxLevel"] == "number" && isFinite(c) && isFinite(lo) && isFinite(hi) && int(c) == c && int(lo) == lo && int(hi) == hi && lo >= -64 && hi <= 64 && lo <= c && c <= hi)
++                  {
++                     current = int(c); minimum = int(lo); maximum = int(hi); status = "ok";
++                  }
++               }
++            }
++         }
++         catch(e:Error) { status = "error"; }
++         try
++         {
++            CommunicationManager.CallGameService("PostServerCommand",{
++               "command":"a11y.floor_native",
++               "commandArgs":[zone,this.mA11yFloorQuerySequence,status,current,minimum,maximum]
++            });
++         }
++         catch(replyError:Error) { }
++      }
++
+       public function RefreshFloorData(param1:Object = null) : void
+       {
+          var _loc2_:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
+diff --git a/tools/test_basement_adapter.py b/tools/test_basement_adapter.py
+new file mode 100644
+index 0000000..4e31cad
+--- /dev/null
++++ b/tools/test_basement_adapter.py
+@@ -0,0 +1,137 @@
++"""Basement adapter safety and wiring, without native input or purchases."""
++import contextlib,pathlib,sys,tempfile,types,unittest
++from unittest.mock import Mock,patch
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_basement as b
++
++class DrawTests(unittest.TestCase):
++ def setUp(self):
++  self.box=(2,3,6,8);self.state={'zone':9,'household':1};self.before={((12,12,14,14),0)};self.after=self.before|{(self.box,-1)}
++  self.frame=types.SimpleNamespace(width=20,depth=20,world=lambda x,z:(100+x,200-z))
++  self.build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),frame=lambda:self.frame,set_floor=Mock(return_value=True),drag=Mock(),_last_error={'text':'old message','at':-1},_busy=[False],funds=lambda:10000)
++  def point(points,level,action,description,**kwargs):action([(10,20),(30,40)]);return True
++  self.build.point_and_act=Mock(side_effect=point)
++  b._build=self.build;b._core=types.SimpleNamespace(post=lambda fn,*a:fn(*a),speak=Mock(),log_exc=Mock())
++  b._helpers=types.SimpleNamespace(_native_floor=Mock(return_value={'floor':0,'minimum':-4,'maximum':4}))
++  self.patches=[patch.object(b,'_context',return_value=self.state),patch.object(b,'_same_context',return_value=True),patch.object(b,'_rooms',side_effect=lambda:self.after if self.build.drag.called else self.before),patch.object(b,'_rectangle',return_value=True),patch.object(b,'_tool',return_value=True),patch.object(b,'_log'),patch.object(b,'_enabled',return_value=True),patch.object(b.time,'sleep',return_value=None)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def test_basement_draws_from_ground_and_verifies_negative_floor(self):
++  self.assertEqual(b._draw(self.box,True),self.box)
++  self.build.set_floor.assert_called_once_with(0)
++  args=self.build.point_and_act.call_args
++  self.assertEqual(args[0][0],[(102,197),(106,192)]);self.assertEqual(args[0][1],0)
++  self.assertTrue(args[1]['overview']);self.build.drag.assert_called_once_with((10,20),(30,40))
++  self.assertEqual([c[0][0] for c in b._tool.call_args_list],[b.TOOL,b.TOOL,'Room Tool'])
++ def test_original_room_worker_is_preserved_on_other_levels(self):
++  with patch.object(b,'_original_room',return_value='ordinary') as original:
++   for level in (0,1,2,-2):
++    self.assertEqual(b.room_worker(self.box,overview=True,tries=2,level=level),'ordinary')
++    original.assert_called_with(self.box,overview=True,tries=2,level=level)
++  self.build.drag.assert_not_called()
++ def test_disabled_experimental_flag_never_draws(self):
++  b._enabled.return_value=False
++  self.assertEqual(b.room_worker(self.box,level=-1),'disabled');self.build.drag.assert_not_called()
++ def test_out_of_bounds_is_rejected_before_floor_or_tool_input(self):
++  self.assertEqual(b.room_worker((0,3,6,8),level=-1),'unverified')
++  self.build.set_floor.assert_not_called();b._tool.assert_not_called()
++ def test_existing_basement_overlap_is_not_modified(self):
++  self.before.add(((3,4,5,7),-1))
++  self.assertEqual(b._draw(self.box,True),'occupied');self.build.drag.assert_not_called()
++ def test_missing_basement_tool_prevents_drag_and_restores_room_tool(self):
++  b._tool.side_effect=[False,True]
++  self.assertEqual(b._draw(self.box,True),'nocatalog');self.build.drag.assert_not_called()
++  self.assertEqual(b._tool.call_args[0][0],'Room Tool')
++ def test_unknown_native_floor_stops_before_drawing(self):
++  self.build.set_floor.return_value=False
++  self.assertEqual(b._draw(self.box,True),'nofloor');b._tool.assert_not_called()
++ def test_changed_native_floor_refuses_the_drag(self):
++  b._helpers._native_floor.return_value={'floor':1}
++  self.assertEqual(b.room_worker(self.box,True,level=-1),'unverified');self.build.drag.assert_not_called()
++  self.assertEqual(b._tool.call_args[0][0],'Room Tool')
++ def test_wrong_level_never_counts_as_success(self):
++  self.after=self.before|{(self.box,0)}
++  self.assertEqual(b._draw(self.box,True),'unverified')
++ def test_changed_or_missing_prior_rooms_stop_the_plan(self):
++  self.after={(self.box,-1)}
++  self.assertEqual(b._draw(self.box,True),'unverified')
++ def test_wrong_footprint_never_counts_as_success(self):
++  self.after=self.before|{((2,3,7,8),-1)}
++  self.assertEqual(b._draw(self.box,True),'unverified')
++ def test_holes_in_target_footprint_never_count_as_success(self):
++  b._rectangle.return_value=False
++  self.assertEqual(b._draw(self.box,True),'unverified')
++ def test_restore_failure_prevents_the_next_room(self):
++  b._tool.side_effect=[True,True,False]
++  self.assertEqual(b._draw(self.box,True),'nocatalog')
++ def test_context_change_prevents_drag_and_does_not_restore_into_dialog(self):
++  b._same_context.return_value=False
++  self.assertEqual(b.room_worker(self.box,True,level=-1),'unverified')
++  self.build.drag.assert_not_called()
++ def test_no_geometry_acknowledgement_does_not_repeat_purchases_or_undo(self):
++  self.after=self.before
++  self.assertEqual(b._draw(self.box,True),'unverified');self.assertEqual(self.build.drag.call_count,1)
++ def test_adjacent_basement_rooms_are_permitted_but_not_overlaps(self):
++  self.before.add(((6,3,9,8),-1));self.after=self.before|{(self.box,-1)}
++  self.assertEqual(b._draw(self.box,True),self.box)
++
++ def test_inspection_never_changes_catalog_selection_or_buys(self):
++  self.build.fetch_catalog=Mock()
++  def thread(target,**kwargs):return types.SimpleNamespace(start=target)
++  with patch.object(b.threading,'Thread',side_effect=thread):b._inspect()
++  self.build.fetch_catalog.assert_not_called();self.build.drag.assert_not_called();b._tool.assert_not_called()
++  self.assertFalse(self.build._busy[0])
++
++class DetailTests(unittest.TestCase):
++ def test_bounds_reject_invalid_numbers(self):
++  f=types.SimpleNamespace(width=20,depth=20)
++  for value in [(1,2,3), (True,2,3,4), (1,2,float('nan'),4),(1,2,3.5,4),(4,2,3,5),(1,2,20,5)]:
++   with self.assertRaises(ValueError):b._bounds(value,f)
++ def test_rectangle_requires_every_tile_and_exact_level(self):
++  room=types.SimpleNamespace(level=-1,tiles=[(2.5,3.5),(3.5,3.5),(2.5,4.5),(3.5,4.5)])
++  frame=types.SimpleNamespace(local=lambda x,z:(x,z))
++  b._build=types.SimpleNamespace(frame=lambda:frame,_room_box=lambda r:(2,3,4,5))
++  native=types.SimpleNamespace(scan_rooms=lambda:[room])
++  with patch.dict(sys.modules,tyjokr_a11y_plus_rooms=native):
++   self.assertTrue(b._rectangle((2,3,4,5)));room.tiles.pop();self.assertFalse(b._rectangle((2,3,4,5)))
++   room.level=0;self.assertFalse(b._rectangle((2,3,4,5)))
++ def test_reply_delegates_and_requires_matching_native_selection(self):
++  b._original_reply=Mock(return_value='original');b._build=types.SimpleNamespace(_cat={'serial':12})
++  import threading
++  job={'index':3,'name':'Basement Tool','serial':12,'done':threading.Event()};b._selection=job
++  try:
++   self.assertEqual(b._reply('selected%7C2%7CBasement%2520Tool'),'original');self.assertFalse(job['done'].is_set())
++   b._reply('selected%7C3%7CRoom%2520Tool');self.assertFalse(job['done'].is_set())
++   b._reply('selected%7C3%7CBasement%2520Tool');self.assertTrue(job['done'].is_set())
++   self.assertEqual(b._original_reply.call_count,3)
++  finally:b._selection=None
++ def test_tool_requires_real_catalog_match_and_selection_ack(self):
++  state={'zone':1};b._build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),_cat={'serial':2},fetch_catalog=Mock(return_value=[('Room Tool',0,1),('Basement Tool',0,1)]))
++  def select(index,name):b._selection['done'].set()
++  b._build.select_item=Mock(side_effect=select)
++  with patch.object(b,'_same_context',return_value=True),patch.object(b,'_log'):
++   self.assertTrue(b._tool('Basement Tool',state));b._build.select_item.assert_called_once_with(1,'Basement Tool')
++   b._build.select_item.reset_mock();b._build._cat['chosen']=99;self.assertFalse(b._tool('Custom Basement Tool',state));b._build.select_item.assert_not_called();self.assertNotIn('chosen',b._build._cat)
++ def test_menu_extension_preserves_existing_rows_and_does_not_duplicate(self):
++  calls=[];core=types.SimpleNamespace(choose=lambda *a,**k:calls.append(a))
++  rows=[('Original','description','original')];b._core=core
++  b._original_menu=lambda:core.choose('Build helper','prompt',rows,lambda fn:fn(),tag='build')
++  original=core.choose
++  b._open_menu();b._open_menu()
++  self.assertIs(core.choose,original);self.assertEqual(len(rows),1)
++  for call in calls:
++   self.assertEqual(call[2][0],rows[0]);self.assertEqual(len(call[2]),2)
++ def test_render_preserves_sections_and_existing_settings(self):
++  settings=types.SimpleNamespace(DEFAULTS={b.SETTING:True})
++  with patch.dict(sys.modules,tyjokr_a11y_settings=settings),patch.object(b,'_original_render',return_value='[base]\nx = 1\n[contribution]\nwater = on\n[other]\ny = 2\n'):
++   text=b._render({b.SETTING:False});self.assertIn('[contribution]\nexperimental basement = off\nwater = on\n',text);self.assertIn('[other]\ny = 2',text)
++ def test_existing_config_choice_is_retained_and_setting_registered(self):
++  with tempfile.TemporaryDirectory() as folder:
++   p=pathlib.Path(folder)/'settings.cfg';p.write_text('[contribution]\nexperimental basement = off\n')
++   settings=types.SimpleNamespace(DEFAULTS={},_FILE_MAP={},_BOOL_KEYS=('existing',),PATH=str(p),_TRUE_WORDS=('on','true'),_FALSE_WORDS=('off','false'),_stored={},_render=lambda v:'[contribution]\n')
++   row=lambda key,kind,*a,**k:types.SimpleNamespace(key=key,kind=kind)
++   menu=types.SimpleNamespace(ROWS=[row('reload','action')],Row=row)
++   with patch.dict(sys.modules,tyjokr_a11y_settings=settings,tyjokr_a11y_menu=menu):b._install_setting()
++   self.assertIs(settings._stored[b.SETTING],False);self.assertIn(b.SETTING,settings._BOOL_KEYS)
++   self.assertEqual(menu.ROWS[0].key,b.SETTING);self.assertEqual(settings._FILE_MAP[('contribution','experimental basement')],b.SETTING)
++
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_build_coordinates.py b/tools/test_build_coordinates.py
+new file mode 100644
+index 0000000..c6314d5
+--- /dev/null
++++ b/tools/test_build_coordinates.py
+@@ -0,0 +1,166 @@
++"""Resolution-independent projection mapping and fail-closed native input."""
++import importlib.util,os,pathlib,sys,threading,types,unittest
++from unittest.mock import Mock,patch
++ROOT=pathlib.Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'Scripts'))
++commands=types.SimpleNamespace(Command=lambda *a,**k:lambda f:f,CommandType=types.SimpleNamespace(Live=1),CheatOutput=lambda c:lambda s:None)
++sys.modules.update(sims4=types.SimpleNamespace(commands=commands),tyjokr_a11y_speech=types.SimpleNamespace(log_enabled=False,log_line=Mock()))
++sys.modules['sims4.commands']=commands
++import tyjokr_a11y_build_coordinates as c
++G=(2**40,120,80,2880,1800,192,(-1920,0,4800,1800),0x94080000)
++def frame(w=2880,h=1800,geometry=G,mode='noScale'):
++ return c.Frame(42,w,h,mode,(8,80,w-8,h-120),(w,h),geometry)
++class API:
++ def __init__(self):self.events=[];self.pos=(0,0);self.dpi=1;self.restore=[];self.geometry=G;self.owner=os.getpid();self.fail_position=False
++ def SetThreadDpiAwarenessContext(self,ctx):
++  before=self.dpi;self.dpi=ctx.value if hasattr(ctx,'value') else ctx;self.restore.append(self.dpi);return before
++ def GetForegroundWindow(self):return self.geometry[0]
++ def GetWindowThreadProcessId(self,h,p):p._obj.value=self.owner;return 1
++ def GetAncestor(self,h,kind):return h
++ def IsIconic(self,h):return False
++ def GetClientRect(self,h,p):p._obj.left=p._obj.top=0;p._obj.right=self.geometry[3];p._obj.bottom=self.geometry[4];return 1
++ def ClientToScreen(self,h,p):p._obj.x+=self.geometry[1];p._obj.y+=self.geometry[2];return 1
++ def GetDpiForWindow(self,h):return self.geometry[5]
++ def GetSystemMetrics(self,i):return dict(zip((76,77,78,79),self.geometry[6]))[i]
++ def GetWindowLongPtrW(self,h,i):return self.geometry[7]
++ def SetCursorPos(self,x,y):self.events.append(('move',x,y));self.pos=(x,y);return not self.fail_position
++ def GetPhysicalCursorPos(self,p):p._obj.x,p._obj.y=self.pos;return 1
++ def mouse_event(self,*args):self.events.append(('mouse',)+args)
++ def GetAsyncKeyState(self,key):return 0
++ def keybd_event(self,*args):self.events.append(('key',)+args)
++class Tests(unittest.TestCase):
++ def setUp(self):
++  c._frame=frame();c._pending.clear();c._local=threading.local();self.u=API()
++  c._build=types.SimpleNamespace(OFFSET=[0,0],LEFT_DOWN=2,LEFT_UP=4,on_main=lambda fn,*a:True)
++  self.patch=patch.object(c,'_api',return_value=self.u);self.patch.start();self.addCleanup(self.patch.stop)
++  c._original_mouse=Mock()
++ def test_resolution_dpi_mode_matrix_has_no_extra_dpi_multiplier(self):
++  for w,h in [(800,600),(1024,768),(1280,720),(1366,768),(1600,900),(1920,1080),(1920,1200),(2560,1440),(2880,1800),(3840,2160),(5120,2880)]:
++   for dpi in (96,120,144,168,192,240,288):
++    for left,top in ((0,0),(120,80),(-1920,0),(0,-1080)):
++     for style in (0x94080000,0x16cf0000):
++      g=(1,left,top,w,h,dpi,(-6000,-3000,16000,10000),style)
++      f=frame(w,h,g)
++      self.assertEqual(f.client(w*.5,h*.5),(w//2,h//2))
++ def test_exact_fit_backbuffer_mapping(self):
++  f=frame(1920,1200,G,'exactFit');self.assertEqual(f.client(960,600),(1440,900))
++ def test_200_percent_reported_game_coordinates_are_not_doubled(self):
++  self.assertEqual(c.to_screen(1440,900),(1560,980));self.assertEqual(self.u.dpi,1)
++ def test_window_origin_and_negative_monitor_are_applied(self):
++  g=(1,-1920,20,1920,1080,144,(-1920,0,3840,1200),0x94080000)
++  self.u.geometry=g;c._frame=frame(1920,1080,g)
++  self.assertEqual(c.to_screen(960,540),(-960,560))
++ def test_context_restored_after_exception(self):
++  with self.assertRaises(ValueError):
++   with c.physical_context(self.u):raise ValueError('failure')
++  self.assertEqual(self.u.dpi,1)
++ def test_missing_dpi_context_stops_before_input(self):
++  self.u.SetThreadDpiAwarenessContext=lambda ctx:0
++  with self.assertRaises(RuntimeError):c.move_to(100,100)
++  self.assertFalse(self.u.events)
++ def test_foreign_foreground_stops_before_input(self):
++  self.u.owner=0
++  with self.assertRaises(RuntimeError):c.move_to(500,500)
++  self.assertFalse(self.u.events)
++ def test_resize_move_dpi_and_mode_change_are_refused(self):
++  for index,value in ((1,121),(3,1920),(5,144),(7,0x16cf0000)):
++   changed=list(G);changed[index]=value;self.u.geometry=tuple(changed)
++   with self.assertRaises(RuntimeError):c.to_screen(100,100)
++ def test_owned_native_dialog_is_not_treated_as_game_canvas(self):
++  self.u.GetAncestor=lambda h,kind:h+1
++  with self.assertRaises(RuntimeError):c.move_to(500,500)
++  self.assertFalse(self.u.events)
++ def test_unknown_stage_policy_and_invalid_bounds_are_refused(self):
++  with self.assertRaises(ValueError):frame(mode='unknown')
++  with self.assertRaises(ValueError):c.Frame(1,1920,1080,'noScale',(0,0,0,0),(1920,1080),G)
++ def test_unknown_or_outside_points_refused(self):
++  for p in ((-1,1),(2880,1),(1,float('nan'))):
++   with self.assertRaises(ValueError):c.to_screen(*p)
++  c._frame=None
++  with self.assertRaises(RuntimeError):c.to_screen(10,10)
++ def test_letterbox_alignment_uses_uniform_scale_and_offsets(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  f=c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g)
++  self.assertEqual(f.client(960,540),(960,600));self.assertEqual(f.client(0,0),(0,60))
++  f=c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g,'TL')
++  self.assertEqual(f.client(0,0),(0,0))
++ def test_no_border_crop_and_unknown_align_are_refused(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  f=c.Frame(1,1920,1080,'noBorder',(8,80,1912,960),(1920,1080),g)
++  self.assertEqual(f.client(960,540),(960,600))
++  with self.assertRaises(ValueError):f.client(0,0)
++  with self.assertRaises(ValueError):c.Frame(1,1920,1080,'showAll',(8,80,1912,960),(1920,1080),g,'?')
++ def test_alignment_order_variants_map_identically(self):
++  g=(1,0,0,1920,1200,96,(0,0,1920,1200),0)
++  for mode in ('showAll','noBorder'):
++   for a,b in [('TL','LT'),('TR','RT'),('BL','LB'),('BR','RB')]:
++    first=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,a)
++    second=c.Frame(1,1920,1080,mode,(8,80,1912,960),(1920,1080),g,b)
++    self.assertEqual(first.client(960,540),second.client(960,540))
++ def test_nonuniform_mapping_does_not_depend_on_alignment(self):
++  for mode in ('noScale','exactFit'):
++   f=c.Frame(1,1440,900,mode,(8,80,1432,780),(1440,900),G,'unrecognized')
++   self.assertEqual(f.client(720,450),(1440,900))
++ def test_unsafe_panel_points_not_clear(self):
++  self.assertFalse(c.clear_of_panels((100,20)));self.assertFalse(c.clear_of_panels((100,1700)))
++  self.assertTrue(c.clear_of_panels((1440,800)))
++ def test_movement_uses_virtual_desktop_and_verifies_physical_cursor(self):
++  c.move_to(1560,980)
++  expected=(int(round((1560+1920)*65535/4799)),int(round(980*65535/1799)))
++  self.assertIn(('mouse',0xc001,*expected,0,0),self.u.events)
++  self.assertEqual(self.u.dpi,1)
++ def test_no_mouse_down_without_verified_pointer(self):
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_pointer_movement_before_click_is_refused(self):
++  c.move_to(500,500);self.u.pos=(510,500)
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_native_context_change_refuses_mouse_down(self):
++  c.move_to(500,500);c._build.on_main=lambda *a:False
++  with self.assertRaises(RuntimeError):c.mouse(2)
++  self.assertFalse(any(e[:2]==('mouse',2) for e in self.u.events))
++ def test_abort_after_own_mouse_down_releases_button(self):
++  c.move_to(500,500);c.mouse(2);self.u.owner=0
++  with self.assertRaises(RuntimeError):c.move_to(510,510)
++  self.assertIn(('mouse',4,0,0,0,0),self.u.events);self.assertFalse(c._local.down)
++ def test_original_click_or_drag_failure_releases_mouse_and_shift(self):
++  def action(a,shift=False):c.move_to(500,500);c.mouse(2);raise ValueError('original')
++  with self.assertRaisesRegex(ValueError,'original'):c._guarded_action(action,((1,1),),True)
++  self.assertIn(('mouse',4,0,0,0,0),self.u.events);self.assertIn(('key',0x10,0x2a,2,0),self.u.events)
++  self.assertEqual(self.u.dpi,1)
++ def test_build_mode_change_during_drag_releases_button_before_another_move(self):
++  c.move_to(500,500);c.mouse(2);count=len(self.u.events);c._build.on_main=lambda *a:False
++  with self.assertRaises(RuntimeError):c.move_to(510,510)
++  self.assertEqual(self.u.events[count:],[('mouse',4,0,0,0,0)])
++ def test_wheel_actions_retain_original_handler(self):
++  c.mouse(0x800,120);c._original_mouse.assert_called_once_with(0x800,120)
++ def test_reply_rejects_stale_zone_and_malformed_data(self):
++  job={'zone':42,'event':threading.Event(),'result':None};c._pending[1]=job
++  self.assertFalse(c.receive('1|43|point|1|2|2880|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertFalse(c.receive('1|42|point|1|2|NaN|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertFalse(job['event'].is_set())
++ def test_valid_reply_preserves_viewport_and_offscreen_state(self):
++  job={'zone':42,'event':threading.Event(),'result':None};c._pending[1]=job
++  self.assertTrue(c.receive('1|42|viewport|NaN|NaN|2880|1800|noScale||2880|1800|8|80|2872|1680'))
++  self.assertTrue(job['event'].is_set());self.assertEqual(job['result']['status'],'viewport')
++ def test_read_only_preflight_never_calls_input(self):
++  timer=Mock();f=frame();c._build.on_main=lambda f,*a:(1,2,0);c._build.core=types.SimpleNamespace(post=lambda f:None)
++  with patch.object(c,'install'),patch.object(c.threading,'Timer',return_value=timer) as make,patch.object(c,'_measure',return_value=({'status':'point','point':(1440,800)},f)),patch.object(c,'to_screen',return_value=(1560,880)),patch.object(c,'move_to') as move,patch.object(c,'mouse') as click:
++   c.preflight();make.call_args[0][1]();move.assert_not_called();click.assert_not_called()
++ def test_release_does_not_release_a_button_we_did_not_press(self):
++  c._release(self.u);self.assertFalse(self.u.events)
++ def test_project_failure_returns_no_point(self):
++  with patch.object(c,'_measure',side_effect=RuntimeError('unavailable')):self.assertIsNone(c.project(1,2,0))
++ def test_native_probe_roundtrip_does_not_use_legacy_aim_or_input(self):
++  c._build.core=types.SimpleNamespace(post=lambda fn:fn());c._build.floor_height=lambda *a:3
++  requests=[]
++  def send(message):
++   requests.append(message);fields=message.split('|')
++   c.receive('|'.join([fields[2],fields[7],'point','1440','720','2880','1800','noScale','','2880','1800','8','80','2872','1680']))
++  c._build._send_ui=send
++  with patch.dict(sys.modules,services=types.SimpleNamespace(current_zone_id=lambda:42)):
++   self.assertEqual(c.project(10,20,0),(1440,720))
++  self.assertTrue(requests[0].startswith('A11y|coords|'));self.assertFalse(self.u.events);self.assertFalse(c._pending)
++ def test_park_does_not_move_an_unfocused_window(self):
++  self.u.owner=0;c.park_mouse();self.assertFalse(self.u.events)
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_build_helpers.py b/tools/test_build_helpers.py
+new file mode 100644
+index 0000000..fb0456e
+--- /dev/null
++++ b/tools/test_build_helpers.py
+@@ -0,0 +1,134 @@
++"""Native floor-key ownership and current Build-menu routing, without game input."""
++import contextlib,pathlib,sys,types,unittest
++from unittest.mock import Mock,patch
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_build_helpers as h
++class Tests(unittest.TestCase):
++ def setUp(self):
++  self.floor=0;self.events=[];self.released=False;self.geometry=(1,0,0,1920,1080,96);self.modifier=False;self.stall=False
++  self.state={'zone':1,'floor':0,'center':(10,20),'grid':True,'owner':True}
++  self.build=types.SimpleNamespace(current_floor=lambda:self.floor,on_main=lambda fn,*args:fn(*args))
++  self.u=types.SimpleNamespace(GetAsyncKeyState=lambda k:0x8000 if self.modifier and k==17 else 0,keybd_event=self.key)
++  @contextlib.contextmanager
++  def physical(u):
++   self.events.append('physical-on')
++   try:yield
++   finally:self.events.append('physical-restored')
++  def measure(*args):self.events.append('roundtrip');self.released=True
++  self.coords=types.SimpleNamespace(_api=lambda:self.u,physical_context=physical,window=lambda u:self.geometry,_measure=measure)
++  h._build,h._coordinates=self.build,self.coords
++  self.patches=[patch.object(h,'_native_floor',side_effect=lambda state:{'floor':self.floor,'minimum':-4,'maximum':4}),patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def key(self,key,scan,flags,extra):
++  self.events.append(('key',key,scan,flags))
++  if flags==3 and not self.stall:self.floor += 1 if key==33 else -1
++ def test_grid_releases_before_native_key_and_is_restored(self):
++  self.assertTrue(h.set_floor(1));self.assertEqual(self.floor,1)
++  self.assertLess(self.events.index('A11yBuildGridOff'),self.events.index('roundtrip'))
++  self.assertLess(self.events.index('roundtrip'),self.events.index(('key',33,0x49,1)))
++  self.assertEqual(self.events[-1],'restore-grid');self.assertIn('physical-restored',self.events)
++ def test_downward_and_multiple_levels_follow_native_report(self):
++  self.floor=2;self.state['floor']=2
++  self.assertTrue(h.set_floor(-1));self.assertEqual(self.floor,-1)
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),3)
++ def test_already_on_floor_emits_no_input_or_grid_messages(self):
++  self.assertTrue(h.set_floor(0));self.assertEqual(self.events,[])
++ def test_inactive_grid_is_not_reenabled(self):
++  self.state.update(grid=False,owner=False);self.released=True
++  self.assertTrue(h.set_floor(1));self.assertNotIn('restore-grid',self.events);self.assertNotIn('A11yBuildGridOff',self.events)
++ def test_no_key_before_native_ack(self):
++  self.coords._measure=lambda *a:self.events.append('roundtrip')
++  with patch.object(h.time,'monotonic',side_effect=[0,3]):self.assertFalse(h.set_floor(1))
++  self.assertFalse(any(isinstance(x,tuple) for x in self.events));self.assertIn('restore-grid',self.events)
++ def test_native_context_change_refuses_input(self):
++  h._same_world.return_value=False
++  self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
++ def test_modifier_keys_are_never_borrowed(self):
++  self.modifier=True;self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
++ def test_floor_boundary_stops_without_repeating_unacknowledged_key(self):
++  self.stall=True;self.assertFalse(h.set_floor(1))
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
++ def test_key_up_survives_failure_after_key_down(self):
++  h.time.sleep.side_effect=RuntimeError('interrupted')
++  self.assertFalse(h.set_floor(1));self.assertIn(('key',33,0x49,3),self.events);self.assertIn('restore-grid',self.events)
++ def test_invalid_floor_requests_are_safe(self):
++  for value in [True,1.5,float('nan'),float('inf'),10**1000,'1',None]:self.assertFalse(h.set_floor(value))
++  self.assertEqual(self.events,[])
++ def test_alt_b_resolves_later_menu_wrappers(self):
++  build=types.SimpleNamespace(open_menu=Mock(return_value='detached'))
++  with patch.dict(sys.modules,tyjokr_a11y_plus_build=build):
++   self.assertEqual(h._build_menu(),'detached');build.open_menu=Mock(return_value='colors');self.assertEqual(h._build_menu(),'colors')
++ def test_camera_estimate_cannot_override_native_floor(self):
++  self.state['floor']=-1
++  self.assertTrue(h.set_floor(0));self.assertEqual(self.events,[])
++ def test_out_of_native_bounds_never_sends_input(self):
++  h._native_floor.side_effect=lambda state:{'floor':0,'minimum':0,'maximum':3}
++  self.assertFalse(h.set_floor(-1));self.assertEqual(self.events,[])
++ def test_unexpected_native_jump_stops_before_another_key(self):
++  original=self.u.keybd_event
++  def jump(key,scan,flags,extra):
++   original(key,scan,flags,extra)
++   if flags==3:self.floor=2
++  self.u.keybd_event=jump
++  self.assertFalse(h.set_floor(1))
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
++ def test_stair_plan_cleanup_after_early_failure(self):
++  planner=types.SimpleNamespace(_pending_stairs=['stale basement'])
++  plan=types.SimpleNamespace(_a11y_transitions=[('new',0,1)])
++  def fail(p):
++   self.assertEqual(h._house_context.transitions,tuple(plan._a11y_transitions))
++   raise RuntimeError('room failed')
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_build',side_effect=fail):
++   with self.assertRaises(RuntimeError):h._house_build(plan)
++  self.assertEqual(planner._pending_stairs,[])
++ def test_ordinary_house_discards_abandoned_basement_stairs(self):
++  planner=types.SimpleNamespace(_pending_stairs=['basement'])
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_build',side_effect=lambda p:self.assertEqual(planner._pending_stairs,[])):
++   h._house_build(types.SimpleNamespace())
++  self.assertEqual(planner._pending_stairs,[])
++
++class TransportTests(unittest.TestCase):
++ def setUp(self):
++  h._floor_job=None;h._floor_sequence=-1;h._floor_quarantined=False
++  h._build=types.SimpleNamespace(on_main=lambda fn,*args:fn(*args),_send_ui=lambda msg:h._receive_floor('9',1,'ok',1,-2,4))
++  self.guard=patch.object(h,'_same_world',return_value=True);self.guard.start();self.addCleanup(self.guard.stop)
++ def tearDown(self):
++  h._floor_job=None;h._floor_sequence=-1;h._floor_quarantined=False
++ def test_query_accepts_authoritative_snapshot(self):
++  self.assertEqual(h._native_floor({'zone':9}),{'floor':1,'minimum':-2,'maximum':4})
++ def test_timeout_quarantines_channel_and_ignores_late_reply(self):
++  h._build._send_ui=Mock()
++  with self.assertRaises(RuntimeError):h._native_floor({'zone':9},timeout=0)
++  self.assertTrue(h._floor_quarantined)
++  h._receive_floor('9',1,'ok',0,-2,4)
++  with self.assertRaises(RuntimeError):h._native_floor({'zone':9},timeout=0)
++  self.assertEqual(h._build._send_ui.call_count,1)
++ def test_wrong_zone_and_old_sequence_cannot_complete_request(self):
++  h._floor_sequence=5
++  def reply(msg):
++   h._receive_floor('8',6,'ok',0,-2,4);self.assertFalse(h._floor_job['done'].is_set())
++   h._receive_floor('9',5,'ok',0,-2,4);self.assertFalse(h._floor_job['done'].is_set())
++   h._receive_floor('9',6,'ok',2,-2,4)
++  h._build._send_ui=reply
++  self.assertEqual(h._native_floor({'zone':9})['floor'],2)
++ def test_invalid_bounds_and_native_refusal_never_become_floor_zero(self):
++  for status,current,low,high in [('ok',2,3,4),('ok',False,-2,4),('unavailable',0,0,0)]:
++   h._floor_sequence=-1
++   h._build._send_ui=lambda msg:h._receive_floor('9',1,status,current,low,high)
++   with self.assertRaises(RuntimeError):h._native_floor({'zone':9})
++ def test_overlapping_query_is_refused(self):
++  h._floor_lock.acquire()
++  try:
++   with self.assertRaises(RuntimeError):h._native_floor({'zone':9})
++  finally:h._floor_lock.release()
++ def test_plan_stairs_use_thread_local_plan_not_global_pending(self):
++  planner=types.SimpleNamespace(_pending_stairs=['stale'],_original_stairs=Mock(return_value=True),_place_stair_at=Mock(return_value=True))
++  h._house_context.transitions=(((3,4),(1,0),0,1),)
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_stairs',planner._original_stairs),patch.object(h,'_log'):
++   self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
++   planner._place_stair_at.assert_called_once_with((3,4),(1,0),0)
++   planner._original_stairs.assert_not_called()
++   h._house_context.transitions=()
++   self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
++   planner._original_stairs.assert_called_once_with((0,0),(0,1))
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_coordinate_probe.js b/tools/test_coordinate_probe.js
+new file mode 100644
+index 0000000..632ac92
+--- /dev/null
++++ b/tools/test_coordinate_probe.js
+@@ -0,0 +1,77 @@
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
++const source=fs.readFileSync(path.join(__dirname,'../flash/TooltipManager_patched.as'),'utf8');
++function method(name,runtime){
++ const signature=new RegExp('public function '+name+'\\(([^)]*)\\)\\s*:\\s*\\w+\\s*\\{').exec(source);assert(signature,name);
++ let start=signature.index+signature[0].length,end=start,depth=1;
++ while(depth){if(source[end]==='{')depth++;if(source[end]==='}')depth--;end++;}
++ const strip=s=>s.replace(/:\s*(?:Sprite|Stage|Point|Rectangle|Array|String|Object|Number|Boolean|Error|Event|int)\b/g,'');
++ return vm.runInNewContext('(function('+strip(signature[1]) +'){'+strip(source.slice(start,end-1))+'})',runtime);
++}
++let now=0;
++class Point{constructor(x,y){this.x=x;this.y=y;}}
++class Sprite{
++ constructor(){this.visible=true;this.parent=null;this.listeners=new Map();}
++ addEventListener(name,fn){this.listeners.set(name,fn);}
++ removeEventListener(name,fn){if(this.listeners.get(name)===fn)this.listeners.delete(name);}
++ localToGlobal(){return new Point(this.x,this.y);}
++}
++function fixture(){
++ const services=[],replies=[],stage={stageWidth:2880,stageHeight:1800,scaleMode:'noScale',align:''};
++ const layer={stage,children:[],addChild(s){this.children.push(s);s.parent=this;},removeChild(s){this.children.splice(this.children.indexOf(s),1);s.parent=null;}};
++ const ui={mTooltipsLayer:layer,mA11yCoordinateMarker:null,mA11yBuildControls:true,mA11yKeyboard:true,mA11yKeyboardLease:10000,
++  mA11yBuildCursor:true,mode:2,blocked:false,zone:'954785138800659508',bind:true,
++  A11yWorldHudMode(){return this.mode;},A11yBuildBlocked(){return this.blocked;},
++  A11yBuildBounds(){return {left:8,top:80,right:2872,bottom:1680};},
++  A11yPostToPython(name,text){replies.push([name,decodeURIComponent(text).split('|')]);}};
++ const runtime={Point,Sprite,Stage:Object,Event:{ENTER_FRAME:'frame'},Number,String,Math,isFinite,int:Math.trunc,
++  getTimer:()=>now,encodeURIComponent,
++  getDefinitionByName:()=>({StageWidth:2880,StageHeight:1800}),
++  CommunicationManager:{CallGameService(name,data){
++   services.push([name,data]);if(name==='BBGetCurrentZoneId')return ui.zone;
++   if(name==='BindDisplayObject'&&ui.bind){data.displayObject.x=1440;data.displayObject.y=720;}
++  }}};
++ for(const name of ['A11yCoordinateCancel','A11yCoordinateReply','A11yCoordinateProbe','A11yCoordinateFrame'])ui[name]=method(name,runtime).bind(ui);
++ return {ui,layer,stage,replies,services};
++}
++function request(f,serial=1,zone=f.ui.zone){f.ui.A11yCoordinateProbe(['A11y','coords',String(serial),'10','3','20','0',zone]);}
++let count=0;function test(name,fn){now=0;fn();count++;console.log('PASS '+name);}
++test('native read-only projection returns point and both coordinate dimensions',()=>{
++ const f=fixture();request(f);f.ui.A11yCoordinateFrame({});
++ assert.equal(f.replies[0][0],'a11y.coords_enc');
++ assert.deepStrictEqual(Array.from(f.replies[0][1]),['1',f.ui.zone,'point','1440','720','2880','1800','noScale','','2880','1800','8','80','2872','1680']);
++ assert.equal(f.layer.children.length,0);assert.equal(f.ui.mA11yCoordinateMarker,null);assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('projection uses only zone query, bind and unbind, never input services',()=>{
++ const f=fixture();request(f);f.ui.A11yCoordinateFrame({});
++ assert(f.services.every(([name])=>['BBGetCurrentZoneId','BindDisplayObject','UnbindDisplayObject'].includes(name)));
++});
++test('blocked context is refused without a marker or cursor changes',()=>{
++ const f=fixture();f.ui.blocked=true;request(f);assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.layer.children.length,0);assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('zone mismatch is refused without binding',()=>{
++ const f=fixture();request(f,1,'other');assert.equal(f.replies[0][1][2],'zonechanged');assert(!f.services.some(([n])=>n==='BindDisplayObject'));
++});
++test('mode change cancels an outstanding marker',()=>{
++ const f=fixture();request(f);f.ui.mode=1;f.ui.A11yCoordinateFrame({});assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.layer.children.length,0);
++});
++test('offscreen timeout still supplies viewport measurements and cleans up',()=>{
++ const f=fixture();f.ui.bind=false;request(f);now=2000;f.ui.A11yCoordinateFrame({});
++ assert.equal(f.replies[0][1][2],'viewport');assert.equal(f.replies[0][1][3],'NaN');assert.equal(f.replies[0][1][5],'2880');assert.equal(f.layer.children.length,0);
++});
++test('replacement request cancels its own previous marker only',()=>{
++ const f=fixture();request(f);request(f,2);assert.equal(f.replies[0][1][2],'cancelled');assert.equal(f.layer.children.length,1);
++ f.ui.A11yCoordinateFrame({});assert.equal(f.replies[1][1][0],'2');assert.equal(f.layer.children.length,0);
++});
++test('invalid coordinates never bind or touch any cursor',()=>{
++ const f=fixture();f.ui.A11yCoordinateProbe(['A11y','coords','1','NaN','3','20','0',f.ui.zone]);assert.equal(f.layer.children.length,0);assert.equal(f.services.length,0);
++});
++test('lease expiry before frame cancels without changing existing cursor',()=>{
++ const f=fixture();request(f);now=20000;f.ui.A11yCoordinateFrame({});assert.equal(f.replies[0][1][2],'blocked');assert.equal(f.ui.mA11yBuildCursor,true);
++});
++test('encoded route adds exactly one probe dispatch',()=>{
++ assert(source.includes('if(_loc2_[1] == "coords" && _loc2_.length == 8) { this.A11yCoordinateProbe(_loc2_); return; }'));
++ const probe=source.slice(source.indexOf('public function A11yCoordinateCancel'),source.indexOf('public function A11yBuildProjectionFrame'));
++ for(const forbidden of ['SetupVirtualCursor','SetVirtualCursorPosition','SendVirtualCursorClick','BBGamepadPlaceMultiple'])assert(!probe.includes(forbidden),forbidden);
++});
++console.log(count+' coordinate probe checks passed (native renderer mocked).');
+diff --git a/tools/test_event_activation_v13.js b/tools/test_event_activation_v13.js
+index 8ad8c21..249b371 100644
+--- a/tools/test_event_activation_v13.js
++++ b/tools/test_event_activation_v13.js
+@@ -102,7 +102,7 @@ test('Purchase rows, non-picker owners and cells without Selected are not toggle
+ test('Checkbox state reads Selected on toggle cells before the Checkbox class path',()=>{
+  const state=body('A11yCheckboxState').text;
+  const branch=state.indexOf('if(this.A11yPickerToggleCell(param1))');
+- const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0)');
++ const checkbox=state.indexOf('if(_loc2_.indexOf("Checkbox") >= 0');
+  assert(branch>=0&&checkbox>branch,'toggle-cell branch precedes the Checkbox branch');
+  assert(/return Object\(param1\)\["Selected"\] == true \? "checked" : "unchecked";/.test(state.slice(branch,branch+300)));
+ });
+diff --git a/tools/test_event_goals.py b/tools/test_event_goals.py
+new file mode 100644
+index 0000000..bfe0684
+--- /dev/null
++++ b/tools/test_event_goals.py
+@@ -0,0 +1,53 @@
++"""Read-only event-goal requests: identity, timeouts and menu routing."""
++import ast,pathlib,sys,types,unittest
++from unittest.mock import Mock,patch
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_event_goals as g
++from urllib.parse import unquote
++class Tests(unittest.TestCase):
++ def setUp(self):
++  g._pending=None;g._serial=0;g._registered=False;self.zone=9007199254740993
++  self.hub=types.SimpleNamespace(_event=Mock(return_value=(object(),object())),_ui=Mock())
++  self.speech=types.SimpleNamespace(log_line=Mock(),speak=Mock())
++  self.services=types.SimpleNamespace(current_zone_id=lambda:self.zone)
++  self.timers=[]
++  def timer(seconds,fn):
++   instance=types.SimpleNamespace(start=Mock(),callback=fn,daemon=False);self.timers.append(instance);return instance
++  self.patches=[patch.dict(sys.modules,services=self.services,tyjokr_a11y_hub=self.hub,tyjokr_a11y_pump=types.SimpleNamespace(post=Mock()),tyjokr_a11y_narrator=types.SimpleNamespace(_decode_percent=unquote),tyjokr_a11y_lang=types.SimpleNamespace(t=lambda s:s),tyjokr_a11y_speech=self.speech),patch.object(g,'_register'),patch.object(g.threading,'Timer',side_effect=timer)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def test_request_keeps_exact_large_event_and_zone_identity(self):
++  self.assertTrue(g.open_goals(18446744073709551000));self.hub._ui.assert_called_once_with('A11y|eventgoals|18446744073709551000|9007199254740993|1')
++  self.assertTrue(self.timers[0].daemon);self.timers[0].start.assert_called_once()
++ def test_ended_event_does_not_send_a_native_request(self):
++  self.hub._event.return_value=(None,None)
++  self.assertFalse(g.open_goals(4));self.hub._ui.assert_not_called();self.assertEqual(self.timers,[])
++ def test_opened_acknowledgement_does_not_interrupt_native_goal_narration(self):
++  g.open_goals(4);self.assertTrue(g.receive('1%7C9007199254740993%7Copened'));self.speech.speak.assert_not_called();self.assertIsNone(g._pending)
++ def test_wrong_request_or_zone_cannot_complete_a_current_request(self):
++  g.open_goals(4)
++  for reply in ['2|9007199254740993|opened','1|8|opened','garbage']:
++   self.assertFalse(g.receive(reply));self.assertIsNotNone(g._pending)
++  self.assertTrue(g.receive('1|9007199254740993|opened'))
++ def test_zone_change_discards_acknowledgement_and_timeout_speech(self):
++  g.open_goals(4);self.zone=8
++  self.assertFalse(g.receive('1|9007199254740993|opened'));g._expire(1);self.speech.speak.assert_not_called()
++ def test_old_timeout_does_not_cancel_a_newer_request(self):
++  g.open_goals(4);g.open_goals(5);g._expire(1);self.assertEqual(g._pending['event'],5);self.speech.speak.assert_not_called()
++ def test_missing_ui_reply_reports_unavailable_once(self):
++  g.open_goals(4);g._expire(1);g._expire(1);self.speech.speak.assert_called_once_with('event goals unavailable',explicit=True)
++ def test_native_refusal_does_not_complete_or_end_the_event(self):
++  g.open_goals(4);self.assertFalse(g.receive('1|9007199254740993|blocked'))
++  self.speech.speak.assert_called_once_with('event goals unavailable',explicit=True)
++  self.assertEqual(self.hub._ui.call_count,1)
++ def test_stale_reply_is_discarded(self):
++  g.open_goals(4);g._pending['until']=0
++  self.assertFalse(g.receive('1|9007199254740993|opened'));self.speech.speak.assert_not_called()
++ def test_event_menu_adds_goals_without_replacing_existing_end_actions(self):
++  root=pathlib.Path(__file__).resolve().parents[1]
++  tree=ast.parse((root/'Scripts/tyjokr_a11y_hub.py').read_text())
++  code=ast.Module(body=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='event_actions'])
++  captured=[];goals=Mock();ended=Mock()
++  namespace={'_event':lambda sid:(object(),types.SimpleNamespace(display_name='Native event')),'menu':types.SimpleNamespace(_raw=lambda s:s),'lang':types.SimpleNamespace(t=lambda s:s),'_window':lambda *a,**k:captured.append(a),'event_goals':goals,'end_event':ended}
++  exec(compile(code,'native_event_actions','exec'),namespace);namespace['event_actions'](42)
++  rows=captured[0][2];self.assertEqual(len(rows),4);self.assertEqual(rows[0][0],'current event goals');rows[0][2]();goals.assert_called_once_with(42);ended.assert_not_called()
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_flash_navigation_v10.js b/tools/test_flash_navigation_v10.js
+index c4f2bb7..a693550 100644
+--- a/tools/test_flash_navigation_v10.js
++++ b/tools/test_flash_navigation_v10.js
+@@ -82,6 +82,7 @@ function manager() {
+     A11yMoveInQuote: () => {}, // Move-in context has its own source-executing suite.
+     A11yTransferQuote: () => {}, // Transfer labels have their own suite (test_transfer_labels.js).
+     A11yMoveLabel: () => {}, // Move furnishing labels: test_transfer_labels.js.
++    A11yGraphicsRowLabel: () => {}, // Graphics labels execute in test_options_simplified.js.
+     A11yCalendarHeader: () => false,
+     A11yCalendarLabel: () => '',
+     A11yCompleted: () => false,
+diff --git a/tools/test_house_workflow.py b/tools/test_house_workflow.py
+new file mode 100644
+index 0000000..7717e66
+--- /dev/null
++++ b/tools/test_house_workflow.py
+@@ -0,0 +1,140 @@
++"""Unified planning, native geometry preservation, and cached-floor regression."""
++import ast,copy,pathlib,sys,threading,types,unittest
++from unittest.mock import Mock,patch
++import test_scanner_v5 as env
++import tyjokr_a11y_plus_build as native_build
++import tyjokr_a11y_plus_house as native_house
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_house_workflow as w
++ROOT=pathlib.Path(__file__).resolve().parents[1]
++# Execute the existing plan generator without its import-time integration hooks.
++tree=ast.parse((ROOT/'contrib-reference/modules/tyjokr_a11y_house_planner.py').read_text())
++subset=ast.Module(body=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in ('_room','_build_plan')])
++namespace={};exec(compile(subset,'existing_house_planner','exec'),namespace)
++
++class PlanningTests(unittest.TestCase):
++ def setUp(self):
++  self.menus=[];self.text=[]
++  frame=types.SimpleNamespace(width=40,depth=40)
++  self.frame=frame
++  core=types.SimpleNamespace(choose=lambda *a,**k:self.menus.append((a,k)),speak=Mock(),ask_text=lambda *a:self.text.append(a))
++  planner=types.SimpleNamespace(_limits=lambda:(-4,3),_build_plan=namespace['_build_plan'])
++  self.patches=[patch.object(native_build,'frame',return_value=frame),patch.object(native_house,'street_side',return_value='north'),patch.object(w,'_build',native_build),patch.object(w,'_house',native_house),patch.object(w,'_planner',planner),patch.object(w,'_core',core),patch.object(w,'_valid',return_value=True),patch.object(w,'_context',side_effect=lambda p:p),patch.object(w,'_log'),patch.object(native_build,'funds',return_value=100000),patch.object(native_build,'in_build_mode',return_value=True)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def plan(self):return native_house.make_two_floor_plan('2bed')
++ def select(self,value):self.menus[-1][0][3](value)
++ def test_original_two_floor_presets_keep_geometry_in_all_compass_orientations(self):
++  for side in ('north','east','south','west'):
++   native_house.street_side.return_value=side
++   for variant in ('2bed','3bed','4bed'):
++    original=native_house.make_two_floor_plan(variant);new=w._extend(original,2,False)
++    self.assertEqual([(r['box'],r['uv'],r['level'],r['kind']) for r in new.rooms],[(r['box'],r['uv'],r['level'],r['kind']) for r in original.rooms])
++    self.assertEqual([(d['tile_a'],d['tile_b'],d['level'],d['front']) for d in new.doors],[(d['tile_a'],d['tile_b'],d['level'],d['front']) for d in original.doors])
++    self.assertEqual(new.stairs,original.stairs);self.assertEqual(len(new._a11y_transitions),1)
++ def test_one_floor_preset_has_no_stairs_or_implicit_extra_floor(self):
++  original=native_house.make_plan(list(native_house.PRESETS[0][1]));new=w._extend(original,1,False)
++  self.assertEqual([r['box'] for r in new.rooms],[r['box'] for r in original.rooms]);self.assertIsNone(new.stairs);self.assertEqual(new._a11y_transitions,[])
++ def test_extra_floors_repeat_top_layout_and_basement_uses_ground(self):
++  original=self.plan();new=w._extend(original,4,True)
++  for level in (-1,0,1,2,3):
++   source=0 if level<=0 else 1
++   self.assertEqual([r['box'] for r in new.rooms if r['level']==level],[r['box'] for r in original.rooms if r['level']==source])
++  self.assertEqual([a[2:] for a in new._a11y_transitions],[(-1,0),(0,1),(1,2),(2,3)])
++  self.assertEqual(sum(d['front'] for d in new.doors),1)
++ def test_changing_story_count_preserves_existing_basement_custom_names(self):
++  plan=w._extend(self.plan(),2,True);plan.rooms[0]['name']='Hobby basement';plan.rooms[0]['kind']='room'
++  changed=w._extend(plan,3,True)
++  self.assertEqual(changed.rooms[0]['name'],'Hobby basement');self.assertEqual(changed.rooms[0]['kind'],'room')
++ def test_repeated_extensions_do_not_accumulate_floor_prefixes(self):
++  plan=w._extend(self.plan(),3,False);new=w._extend(plan,4,False)
++  self.assertTrue(all('Floor 3' not in r['name'] for r in new.rooms if r['level']==3))
++ def test_removing_stories_removes_their_doors_and_stairs(self):
++  plan=w._extend(self.plan(),3,True);new=w._extend(plan,1,False)
++  self.assertTrue(all(r['level']==0 for r in new.rooms));self.assertTrue(all(d['level']==0 for d in new.doors));self.assertIsNone(new.stairs)
++ def test_unverified_story_counts_and_missing_stair_hallway_are_refused(self):
++  for count in (0,5,True,1.5):
++   with self.assertRaises(ValueError):w._extend(self.plan(),count,False)
++  plan=self.plan();plan.rooms=[r for r in plan.rooms if r['kind']!='hall']
++  with self.assertRaises(ValueError):w._extend(plan,2,False)
++ def test_both_custom_layouts_produce_the_expected_rooms_on_every_floor(self):
++  for layout,count in [('two',2),('four',4)]:
++   base=namespace['_build_plan'](10,10,[0],layout,{0:['Room {}'.format(i) for i in range(count)]})
++   plan=w._extend(base,3,True)
++   for level in (-1,0,1,2):
++    self.assertEqual(sum(r['level']==level and r['kind']!='hall' for r in plan.rooms),count)
++   self.assertEqual(len(plan._a11y_transitions),3)
++ def test_renaming_a_room_updates_connected_door_labels_without_moving_them(self):
++  plan=self.plan();geometry=copy.deepcopy([(d['tile_a'],d['tile_b']) for d in plan.doors]);plan.rooms[0]['name']='Family lounge';w._door_names(plan)
++  self.assertTrue(any('Family lounge' in d['what'] for d in plan.doors));self.assertEqual([(d['tile_a'],d['tile_b']) for d in plan.doors],geometry)
++ def test_actual_compass_description_rotates_with_the_existing_plan_mapping(self):
++  native_house.street_side.return_value='west';plan=self.plan();text=w._position(plan,plan.rooms[0])
++  self.assertIn('street-facing',text);self.assertIn('south west side',text)
++ def test_unified_menu_contains_one_builder_and_preserves_other_actions(self):
++  original_rows=[('Configurable stacked house','stack','stack'),('Other','other','other'),('Build my house','preset','preset')]
++  core=w._core;original=core.choose
++  with patch.object(w,'_original_menu',side_effect=lambda:core.choose('Build helper','prompt',original_rows,lambda f:f(),tag='build')):
++   w._open_menu();w._open_menu()
++  self.assertIs(core.choose,original);self.assertEqual(len(original_rows),3)
++  for args,kwargs in self.menus:
++   self.assertEqual([r[0] for r in args[2]],['Build my house','Other'])
++ def test_room_editor_asks_for_one_room_instead_of_comma_separated_names(self):
++  plan=self.plan();w._edit_rooms(plan);self.select(0);self.select('custom')
++  self.assertEqual(len(self.text),1);self.text[0][3]('  Family   lounge  ')
++  self.assertEqual(plan.rooms[0]['name'],'Family lounge');self.assertIn('Rooms and positions',self.menus[-1][0][0])
++ def test_role_selection_keeps_room_geometry(self):
++  plan=self.plan();box=plan.rooms[0]['box'];w._edit_rooms(plan);self.select(0);self.select(("Children's bedroom",'bedroom'))
++  self.assertEqual(plan.rooms[0]['name'],"Children's bedroom");self.assertEqual(plan.rooms[0]['box'],box)
++ def test_review_does_not_build_until_explicit_confirmation_and_rechecks_context(self):
++  plan=w._extend(self.plan(),2,False)
++  with patch.object(native_house,'start_build') as start:
++   w._review(plan);start.assert_not_called();w._valid.return_value=False;self.select('build');start.assert_not_called()
++ def test_review_uses_the_existing_construction_entry_and_plan_stair_scope(self):
++  plan=w._extend(self.plan(),2,True)
++  with patch.object(native_house,'start_build') as start:
++   w._review(plan);self.select('build');start.assert_called_once_with(plan)
++   self.assertTrue(plan._a11y_roof_prompt);self.assertEqual(len(plan._a11y_transitions),2)
++ def test_ready_made_list_keeps_all_original_presets(self):
++  w._ready_made();rows=self.menus[-1][0][2]
++  self.assertEqual(len(rows),len(native_house.PRESETS)+len(native_house.TWO_FLOOR_PRESETS))
++
++class ScanTests(unittest.TestCase):
++ def setUp(self):
++  self.active=False;self.events=[]
++  class Lot:
++   _min_level=0;_max_level=0
++   @property
++   def min_level(s):
++    if s._min_level is None:s._min_level=-1
++    return s._min_level
++   @property
++   def max_level(s):
++    if s._max_level is None:s._max_level=2
++    return s._max_level
++   def clear_cached_level_range(s):s._min_level=s._max_level=None
++  self.lot=Lot();self.native=lambda:[self.lot.min_level,self.lot.max_level]
++  self.patches=[patch.dict(sys.modules,services=types.SimpleNamespace(active_lot=lambda:self.lot)),patch.object(w,'_build',types.SimpleNamespace(in_build_mode=lambda:self.active,on_main=lambda fn:fn())),patch.object(w,'_original_scan',side_effect=self.native),patch.object(w,'_main_ident',threading.get_ident()),patch.object(w,'_log')]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def test_empty_lot_cached_zero_range_cannot_hide_new_basement_or_upper_story(self):
++  self.assertEqual(self.native(),[0,0]);self.active=True;self.assertEqual(w._scan_rooms(),[-1,2])
++ def test_live_mode_keeps_the_original_cache_behavior(self):self.assertEqual(w._scan_rooms(),[0,0])
++ def test_worker_scan_is_marshalled_without_calling_game_apis_on_worker(self):
++  self.active=True
++  with patch.object(w,'_main_ident',-1):
++   w._build.on_main=Mock(return_value=['pumped']);self.assertEqual(w._scan_rooms(),['pumped'])
++   w._original_scan.assert_not_called();self.assertEqual(self.lot._min_level,0)
++ def test_timeout_never_returns_an_empty_geometry_as_success(self):
++  with patch.object(w,'_main_ident',-1):
++   w._build.on_main=lambda fn:None
++   with self.assertRaises(RuntimeError):w._scan_rooms()
++ def test_uninitialised_thread_guard_never_runs_native_scan(self):
++  with patch.object(w,'_main_ident',None):
++   with self.assertRaises(RuntimeError):w._scan_rooms()
++  w._original_scan.assert_not_called()
++ def test_basement_failure_message_does_not_claim_wrong_room_size(self):
++  basement=types.SimpleNamespace(failure_reason=lambda:'the basement room was not verified')
++  with patch.dict(sys.modules,tyjokr_a11y_basement=basement),patch.object(w,'_original_say') as say:
++   w._say('I stopped building at the storage room, because it came out a different size.')
++   self.assertIn('basement room was not verified',say.call_args[0][0]);self.assertNotIn('different size',say.call_args[0][0])
++   w._say('Building the living room.');say.assert_called_with('Building the living room.')
++
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_native_floor_bridge.js b/tools/test_native_floor_bridge.js
+new file mode 100644
+index 0000000..44baff2
+--- /dev/null
++++ b/tools/test_native_floor_bridge.js
+@@ -0,0 +1,32 @@
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
++const src=fs.readFileSync(path.join(__dirname,'../flash/extra-classes/ControlPanel.as'),'utf8');
++const match=/public function A11yNativeFloorQuery\(([^)]*)\)\s*:\s*void\s*\{/.exec(src);assert(match);
++let at=match.index+match[0].length,end=at,depth=1;
++while(depth){if(src[end]==='{')depth++;if(src[end]==='}')depth--;end++;}
++const strip=s=>s.replace(/:\s*(?:Object|String|Number|Error|int)\b/g,'');
++let count=0;
++function fixture(info={curLevel:1,minLevel:-2,maxLevel:4}){
++ const calls=[],ui={mA11yFloorQuerySequence:0,mGameState:2},flags={IsBetweenStates:false};
++ const runtime={GameStates:{BUILD:2},GameStateFlags:flags,Number,String,isFinite,int:Math.trunc,
++ CommunicationManager:{CallGameService(name,data){calls.push([name,data]);if(name==='BBGetCurrentZoneId')return '18446744073709551600';if(name==='BBGetLevelInfo')return info;}}};
++ ui.query=vm.runInNewContext('(function('+strip(match[1])+'){'+strip(src.slice(at,end-1))+'})',runtime).bind(ui);
++ return {ui,calls,flags};
++}
++function reply(f){return f.calls.filter(([n])=>n==='PostServerCommand').pop()[1];}
++function test(name,fn){fn();count++;console.log('PASS '+name);}
++test('native level, bounds and exact zone are returned without mutating game state',()=>{
++ const f=fixture();f.ui.query();const r=reply(f);assert.equal(r.command,'a11y.floor_native');assert.deepEqual(Array.from(r.commandArgs),['18446744073709551600',1,'ok',1,-2,4]);
++ assert(f.calls.every(([n])=>['BBGetLevelInfo','BBGetCurrentZoneId','PostServerCommand'].includes(n)));
++});
++test('sequence increases once per query',()=>{const f=fixture();f.ui.query();f.ui.query();assert.equal(reply(f).commandArgs[1],2);});
++test('outside Build mode returns unavailable without querying level data',()=>{const f=fixture();f.ui.mGameState=1;f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');assert(!f.calls.some(([n])=>n==='BBGetLevelInfo'));});
++test('transition guard avoids querying changing world',()=>{const f=fixture();f.flags.IsBetweenStates=true;f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');});
++test('missing, fractional, boolean and inconsistent values are never floor zero',()=>{
++ for(const data of [null,{}, {curLevel:false,minLevel:0,maxLevel:4},{curLevel:1.5,minLevel:0,maxLevel:4},{curLevel:2,minLevel:3,maxLevel:4},{curLevel:NaN,minLevel:0,maxLevel:4}]){const f=fixture(data);f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');}
++});
++test('single native listener and no native floor setter or cursor injection',()=>{
++ assert.equal((src.match(/AddMessageListener\("A11yNativeFloorQuery"/g)||[]).length,1);
++ const body=src.slice(at,end);for(const forbidden of ['BBSetLevel','keybd_event','SetVirtualCursorPosition','SendVirtualCursorClick'])assert(!body.includes(forbidden));
++});
++console.log(count+' native floor bridge checks passed (native service mocked).');
+diff --git a/tools/test_options_simplified.js b/tools/test_options_simplified.js
+index 18ec09c..69e9a5e 100644
+--- a/tools/test_options_simplified.js
++++ b/tools/test_options_simplified.js
+@@ -47,6 +47,8 @@ function method(name) {
+   while (depth) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; end++; }
+   const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|Rectangle|Boolean|Number|String|Object|Array|int|Error)\b/g;
+   const body = source.slice(start, end - 1).replace(types, '')
++    .replace(/for each\(suffix in fields\)/g, 'for (suffix of fields)')
++    .replace(/Object\(node\)\["(dd|lb)" \+ suffix\] as DisplayObject/g, 'asCast(Object(node)["$1" + suffix],DisplayObject)')
+     .replace(/:\s*\*/g, '')
+     .replace(/Object\(item\)\[fields\[index\]\]\s+as\s+DisplayObject/g, 'asCast(Object(item)[fields[index]],DisplayObject)')
+     .replace(/\s+as\s+Rectangle\b/g, '')
+@@ -139,7 +141,8 @@ function optionsRow(label, labelVisible = true) {
+ }
+ 
+ function labelUi() {
+-  const ui = {A11yTextValue: field => field.text};
++  const ui = {A11yTextValue: field => field.text, A11yIsLive: value => !!value && value.visible, A11yJoinedText: value => value.label || ''};
++  ui.A11yGraphicsRowLabel = method('A11yGraphicsRowLabel').bind(ui);
+   ui.A11yIsInside = isInside.bind(ui);
+   ui.A11yOptionsRowLabel = rowLabel.bind(ui);
+   return ui;
+@@ -246,4 +249,44 @@ test('visible native descriptions remain readable and option subclasses work', (
+ test('checkbox proxy activation schedules a settled state reread without selecting dropdown values', () => {
+   assert(source.includes('else if(getQualifiedClassName(_loc2_).indexOf("widgets.OptionsMenu.controls::") == 0 && this.A11yOptionsControl(_loc2_) != null && getQualifiedClassName(this.A11yOptionsControl(_loc2_)).indexOf("Checkbox") >= 0)'));
+ });
++const graphicsFields = ['DisplayType','Resolution','RefreshRate','SceneRes','SimQuality','ObjQuality','LightingQuality','ReflectionQuality','EdgeSmooth','VisualEffect','ViewDistance','VisualQuality'];
++function graphicsFixture(kind='DefaultGraphicsTab') {
++  const tab=new DisplayObjectContainer('graphics','widgets.OptionsMenu.controls.tabs::'+kind);
++  for(const suffix of graphicsFields) {
++    tab['dd'+suffix]=tab.add(new DisplayObjectContainer('dd'+suffix,'olympus.gui.buttons::DropdownButton'));
++    tab['lb'+suffix]=tab.add(new DisplayObject('lb'+suffix));tab['lb'+suffix].label='Localized '+suffix;
++  }
++  return tab;
++}
++test('all twelve Graphics dropdowns read their localized name before the value on Windows and Mac',()=>{
++  for(const kind of ['GraphicsTab','DefaultGraphicsTab','MacGraphicsTab']) for(const suffix of graphicsFields) {
++    const tab=graphicsFixture(kind),ui=labelUi(),value=tab['dd'+suffix].add(new TextField('value','Low')),lines=['0|0|Low'];
++    ui.A11yOptionsRowLabel(value,lines);
++    assert.deepStrictEqual(lines,['-999998|0|Localized '+suffix,'0|0|Low']);
++  }
++});
++test('Graphics button focus gets one label and does not alter native control state',()=>{
++  const tab=graphicsFixture(),ui=labelUi(),control=tab.ddResolution,lines=['0|0|2880x1800'];
++  control.enabled=false;ui.A11yOptionsRowLabel(control,lines);
++  assert.deepStrictEqual(lines,['-999998|0|Localized Resolution','0|0|2880x1800']);assert.equal(control.enabled,false);
++});
++test('hidden and missing Graphics labels preserve the value',()=>{
++ for(const missing of [false,true]) {
++  const tab=graphicsFixture(),ui=labelUi(),lines=['0|0|Low'];
++  if(missing) delete tab.lbSimQuality;else tab.lbSimQuality.visible=false;
++  ui.A11yOptionsRowLabel(tab.ddSimQuality,lines);assert.deepStrictEqual(lines,['0|0|Low']);
++ }
++});
++test('Graphics popup choices, checkboxes and unrelated tabs retain their existing speech',()=>{
++ const ui=labelUi(),tab=graphicsFixture(),check=tab.add(new DisplayObject('check')),popup=new DisplayObjectContainer('popup','olympus.gui.lists::ExpandableList');
++ for(const control of [check,popup.add(new TextField('choice','High')),graphicsFixture('OtherTab').ddSimQuality]) {
++  const lines=['0|0|original'];ui.A11yOptionsRowLabel(control,lines);assert.deepStrictEqual(lines,['0|0|original']);
++ }
++});
++test('native Graphics LeftLabelCheckBox reports its actual Selected state',()=>{
++ const ui=optionUi(),box=new DisplayObject('cbLaptopMode','widgets.OptionsMenu::LeftLabelCheckBox');
++ box.Selected=true;assert.equal(ui.A11yCheckboxState(box),'checked');
++ box.Selected=false;assert.equal(ui.A11yCheckboxState(box),'unchecked');
++ box.kind='unrelated::LeftLabelCheckBox';assert.equal(ui.A11yCheckboxState(box),'');
++});
+ console.log(checks + ' Options simplified checks passed (not in-game verification).');
+diff --git a/tools/test_requested_ui_access.js b/tools/test_requested_ui_access.js
+new file mode 100644
+index 0000000..a27980c
+--- /dev/null
++++ b/tools/test_requested_ui_access.js
+@@ -0,0 +1,140 @@
++/* Execute production traversal and scope bodies against native-shaped fixtures. */
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm');
++const fixture=fs.readFileSync(path.join(__dirname,'test_flash_navigation_v10.js'),'utf8');
++const head=fixture.slice(0,fixture.indexOf('let passed = 0;'));
++const checks=String.raw`
++let passed=0;
++function test(name,run){run();passed++;console.log('PASS '+name);}
++function card(kind,fields){
++ const row=new MovieClip('row',kind);row.focusable=true;
++ for(const name of fields){row[name]=row.add(new MovieClip(name,'olympus.gui.buttons::Button'));row[name].focusable=true;row[name].activate=()=>{throw Error('No traversal activation');};}
++ return row;
++}
++for(const [name,kind,fields] of [
++ ['Social Bunny friend','widgets.Gameplay.SocialMedia::SocialMediaFriendCellView',['btnSendMessage','btnRemoveFriend']],
++ ['Social Bunny feed','widgets.Gameplay.SocialMedia::SocialMediaFeedCellView',['btnReaction','btnAddFriend']],
++ ['Social Bunny direct message','widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView',['btnReaction']],
++ ['club','widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView',['btnDetails','btnAction']],
++ ['Gallery subscription','widgets.Exchange.Subscriptions.controls::SubscriptionCellView',['btnFollow','btnBlock','btnUnblock']],
++ ['rental unit','widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitCellView',['btnTravel','btnViewAgreement','btnFillVacancy']],
++ ['household card','widgets.GameEntry.HouseholdPanel.controls::HouseholdPanelCellView',['btnUserHH','btnDelete','btnStoryProgression']]
++])test(name+' retains summary and exposes only visible native actions',()=>{
++ const ui=manager(),row=card(kind,fields),targets=[];ui.A11yCollectFocusables(row,targets,0);
++ assert.deepStrictEqual(targets,[row,...fields.map(name=>row[name])]);
++ row[fields[0]].visible=false;const hidden=[];ui.A11yCollectFocusables(row,hidden,0);assert(!hidden.includes(row[fields[0]]));
++ row.visible=false;const none=[];ui.A11yCollectFocusables(row,none,0);assert.equal(none.length,0);
++});
++test('actual nested direct-message wrapper does not swallow the reaction action or duplicate text stops',()=>{
++ const ui=manager(),outer=new MovieClip('message','widgets.Gameplay.SocialMedia::SocialMediaMessageCellView');outer.focusable=true;
++ const dm=outer.add(card('widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView',['btnReaction']));outer.mcDirectMessage=dm;
++ const targets=[];ui.A11yCollectFocusables(outer,targets,0);assert.deepStrictEqual(targets,[dm,dm.btnReaction]);
++});
++test('unrelated cell with similar child fields keeps the original traversal',()=>{
++ const ui=manager(),row=card('unrelated::CellView',['btnReaction']);const targets=[];ui.A11yCollectFocusables(row,targets,0);assert.deepStrictEqual(targets,[row]);
++});
++test('Social Bunny action speaks its native author and post context with the localized tooltip',()=>{
++ const messages=[];runtime.CommunicationManager={PostServerCommand:(name,payload)=>messages.push([name,decodeURIComponent(payload)])};
++ const ui=manager(),row=card('widgets.Gameplay.SocialMedia::SocialMediaFeedCellView',['btnReaction']);
++ row.txtSimName=row.add(new TextField('txtSimName','Alex'));row.txtPostContent=row.add(new TextField('txtPostContent','Native localized post'));
++ row.btnReaction.TooltipExt={Text:'Native localized reaction label'};
++ ui.A11yAnnounceDisplay(row.btnReaction,'a11y.focus_enc',true);
++ assert(messages[0][1].includes('Alex'));assert(messages[0][1].includes('Native localized post'));assert(messages[0][1].includes('Native localized reaction label'));
++});
++test('goal icon is one readable stop and does not duplicate its decorative children',()=>{
++ const ui=manager(),goal=new MovieClip('goal','widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer');
++ const child=goal.add(new MovieClip('decorativeIcon'));child.focusable=true;
++ const stops=[];ui.A11yCollectFocusables(goal,stops,0);assert.deepStrictEqual(stops,[goal]);
++});
++test('native photo filters and venue cells announce their actual Selected property without enabling them',()=>{
++ for(const kind of ['widgets.Gameplay.SimCamera.controls::CameraFilterCellView','widgets.Gameplay.SituationCreation.controls::LocationCellView']){
++  const ui=manager();ui.A11yPickerToggleCell=()=>false;ui.A11yCheckboxState=method(tooltip.replace(/:\*/g,':Object'),'A11yCheckboxState');
++  const cell=new MovieClip('cell',kind);cell.Selected=true;cell.enabled=false;
++  assert.equal(ui.A11yCheckboxState(cell),'checked');assert.equal(cell.enabled,false);cell.Selected=false;assert.equal(ui.A11yCheckboxState(cell),'unchecked');
++ }
++});
++let now=10000;
++runtime.getTimer=()=>now;runtime.Event={ENTER_FRAME:'frame'};
++function goalFixture(){
++ const services=[],replies=[],listeners=new Map(),ui=manager();
++ const root=new MovieClip('SituationDisplay'),tab=root.add(new MovieClip('tab')),content=tab.add(new MovieClip('event','widgets.Gameplay.SituationDisplay.controls::SituationContent'));
++ content.Id='18446744073709551000';content.visible=false;
++ const goals=content.add(new MovieClip('goals'));content.mSituationGoalDisplay=goals;
++ tab.OpenContentPanelWithId=id=>{assert.equal(id,content.Id);content.visible=true;};
++ ui.mTooltipsLayer={addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:(name,fn)=>listeners.delete(name)};
++ Object.assign(ui,{mA11yKeyboard:true,mA11yKeyboardLease:999999,mA11yActiveModalRoot:null,mA11yStatusScope:null,mA11yScope:null,mA11yPendingScope:null,mA11yGoalContent:null,mA11yGoalScope:null,mA11yGoalCheck:0,
++  A11yModalFrame(){},A11yLoadedWidget:name=>name==='SituationDisplay'?root:null,A11yWorldHudMode:()=>1,
++  A11yIsLive:item=>{for(let n=item;n;n=n.parent)if(!n.visible||!n.stage)return false;return item!=null;},
++  A11yFocusInto:scope=>{ui.mA11yPendingScope=scope;},A11yClearFocus:()=>{ui.cleared=true;},A11yPostToPython:(name,text)=>replies.push([name,decodeURIComponent(text)])});
++ runtime.CommunicationManager={CallGameService:(name,data)=>{services.push([name,data]);if(name==='BBGetCurrentZoneId')return '9007199254740993';throw Error('Unexpected native action '+name);}};
++ const scopeSource=tooltip.replace(/this\.A11yLoadedWidget\(([^)]*)\)\s+as\s+DisplayObject/g,'asCast(this.A11yLoadedWidget($1),DisplayObject)');
++ for(const name of ['A11yEventGoalFind','A11yEventGoalClear','A11yEventGoalFrame','A11yEventGoals','A11yPhotography'])ui[name]=method(scopeSource,name);
++ return {ui,root,tab,content,goals,services,replies,listeners};
++}
++function request(f,id=f.content.Id,zone='9007199254740993'){f.ui.A11yEventGoals(['A11y','eventgoals',id,zone,'7']);}
++test('event goals opens the matching native event panel and scopes only its goals',()=>{
++ const f=goalFixture();request(f);assert.equal(f.ui.mA11yStatusScope,f.goals);assert.equal(f.ui.mA11yPendingScope,f.goals);
++ assert.deepStrictEqual(f.replies,[['a11y.eventgoals_enc','7|9007199254740993|opened']]);assert(f.services.every(([name])=>name==='BBGetCurrentZoneId'));assert.equal(f.listeners.size,1);
++});
++test('wrong event identity or zone never opens another event panel',()=>{
++ for(const wrong of ['id','zone']){const f=goalFixture();request(f,wrong==='id'?'8':f.content.Id,wrong==='zone'?'8':'9007199254740993');assert.equal(f.content.visible,false);assert.equal(f.ui.mA11yStatusScope,null);assert(f.replies[0][1].endsWith('|unavailable'));}
++});
++test('a blocking modal prevents goal focus without closing the dialog',()=>{
++ const f=goalFixture();f.ui.mA11yActiveModalRoot=new MovieClip('dialog');request(f);assert(f.replies[0][1].endsWith('|blocked'));assert.equal(f.content.visible,false);
++});
++test('event identity change or removal releases only the owned goal scope and listener',()=>{
++ for(const change of ['id','visible','zone']){
++  const f=goalFixture();request(f);f.ui.mA11yScope=f.goals;
++  if(change==='id')f.content.Id='other';if(change==='visible')f.content.visible=false;
++  if(change==='zone')runtime.CommunicationManager.CallGameService=()=> 'other';
++  f.ui.A11yEventGoalFrame({});assert.equal(f.ui.mA11yStatusScope,null);assert.equal(f.ui.mA11yPendingScope,null);assert.equal(f.listeners.size,0);assert(f.ui.cleared);
++ }
++});
++test('moving into another scope removes the observer without clearing the new modal focus',()=>{
++ const f=goalFixture();request(f);const other=new MovieClip('other');f.ui.mA11yStatusScope=other;f.ui.mA11yScope=other;
++ f.ui.A11yEventGoalFrame({});assert.equal(f.ui.mA11yScope,other);assert.equal(f.ui.mA11yStatusScope,other);assert.equal(f.listeners.size,0);
++});
++test('goal reader has a bounded lease and no persistent frame work after it ends',()=>{
++ const f=goalFixture();request(f);now=400000;f.ui.A11yEventGoalFrame({});assert.equal(f.listeners.size,0);assert.equal(f.ui.mA11yGoalScope,null);now=10000;
++});
++test('photography route focuses an already open camera without taking a photo',()=>{
++ const f=goalFixture(),camera=new MovieClip('SimCamera');f.ui.A11yLoadedWidget=name=>name==='SimCamera'?camera:null;f.ui.mA11yActiveModalRoot=camera;
++ f.ui.A11yPhotography();assert.equal(f.ui.mA11yStatusScope,camera);assert.equal(f.ui.mA11yPendingScope,camera);assert(f.services.every(([name])=>name==='BBGetCurrentZoneId'));
++ camera.visible=false;f.ui.A11yEventGoalFrame({});assert.equal(f.listeners.size,0);
++});
++test('photography route does not open a camera or bypass another modal',()=>{
++ const f=goalFixture();f.ui.A11yLoadedWidget=()=>null;f.ui.A11yPhotography();assert.equal(f.ui.mA11yStatusScope,null);
++ const camera=new MovieClip('SimCamera');f.ui.A11yLoadedWidget=()=>camera;f.ui.mA11yActiveModalRoot=new MovieClip('other');f.ui.A11yPhotography();assert.equal(f.ui.mA11yStatusScope,null);
++});
++
++test('Social Bunny and event-goal summaries are read-only; Enter does not guess a native action',()=>{
++ for(const kind of ['widgets.Gameplay.SocialMedia::SocialMediaFriendCellView','widgets.Gameplay.SocialMedia::SocialMediaFeedCellView','widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView','widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer']){
++  const ui=manager(),row=new MovieClip('row',kind),spoken=[];
++  Object.assign(ui,{mA11yKeyboard:true,mA11yIdxDir:0,mA11yPendingScope:null,mA11yFocused:row,A11yModalFrame(){},A11ySeasonActivate:()=>false,A11yActivateCASName:()=>false,A11yIsLive:()=>true,A11yActionProxy:item=>item,A11yAnnounceDisplay:item=>spoken.push(item),A11ySafeDispatch:()=>{throw Error('Summary must not click');}});
++  ui.A11yActivate=method(tooltip,'A11yActivate');ui.A11yActivate();assert.deepStrictEqual(spoken,[row]);
++ }
++});
++test('real native child buttons still receive one mouse click sequence on explicit Enter',()=>{
++ const ui=manager(),button=new MovieClip('btnSendMessage','olympus.gui.buttons::Button'),events=[];
++ Object.assign(ui,{mA11yKeyboard:true,mA11yIdxDir:0,mA11yPendingScope:null,mA11yFocused:button,A11yModalFrame(){},A11ySeasonActivate:()=>false,A11yActivateCASName:()=>false,A11yIsLive:()=>true,A11yActionProxy:item=>item,A11yPickerFooter:()=>false,A11yInventoryMenu:()=>false,A11yPickerToggleCell:()=>false,A11ySafeDispatch:(item,event)=>events.push(event)});
++ runtime.MouseEvent={MOUSE_DOWN:'down',MOUSE_UP:'up',CLICK:'click'};
++ ui.A11yActivate=method(tooltip,'A11yActivate');ui.A11yActivate();assert.deepStrictEqual(events,['down','up','click']);
++});
++
++
++test('book-style native title and description rows expose real fields and retain the confirm footer',()=>{
++ const ui=manager(),dialog=new MovieClip('dialog','widgets.Dialog.dialogs::TextInputDialog'),fields=[];
++ for(const kind of ['widgets.Dialog.controls::TextInputCellView','widgets.Dialog.controls::InlineTextInputCellView']){
++  const row=dialog.add(new MovieClip('row',kind));row.focusable=true;
++  row.txtLabel=row.add(new TextField('txtLabel',kind.includes('Inline')?'Native description label':'Native title label'));
++  const component=row.add(new MovieClip('mcTextInput','scaleform.clik.controls::TextInput'));
++  const field=component.add(new TextField('textField','Existing text'));field.type='input';field.focusable=true;fields.push(field);
++ }
++ const confirm=dialog.add(new MovieClip('btnConfirm','olympus.gui.buttons::Button'));confirm.focusable=true;confirm.enabled=false;
++ const targets=[];ui.A11yCollectFocusables(dialog,targets,0);assert.deepStrictEqual(targets,[...fields,confirm]);assert.equal(confirm.enabled,false);
++ const messages=[];runtime.CommunicationManager={PostServerCommand:(name,text)=>messages.push(decodeURIComponent(text))};ui.A11yAnnounceDisplay(fields[0],'a11y.focus_enc',true);assert(messages[0].includes('Native title label'));assert(messages[0].includes('Existing text'));
++});
++
++console.log(passed+' requested and proactive UI checks passed (native runtime mocked).');
++`;
++vm.runInNewContext(head+checks,{require,__dirname,__filename,console},{filename:'requested-ui-fixtures'});

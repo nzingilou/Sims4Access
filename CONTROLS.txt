@@ -351,3 +351,9 @@ Descriptions give the actual compass position and street-facing/rear role.
 Construction starts only after selecting Build this house in the review.
 The separate Configurable stacked house row is replaced by this flow.
 
+
+Requested screen additions:
+Accessibility menu > Events > selected running event > Current event goals.
+Accessibility menu > Panels > Photography controls (open the camera first).
+Social Bunny: arrow/Tab through each readable card and its native action buttons.
+Book title dialogs: use Tab or Shift+Tab to leave the text field, then navigate to the native confirmation footer.

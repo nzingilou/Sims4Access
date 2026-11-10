@@ -3281,6 +3281,7 @@ package olympus.core
          try
          {
             name = getQualifiedClassName(item);
+            if(name == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || name == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || name == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer") { return true; }
             // Occult XP/points are not buttons. Retain one informational
             // stop while the existing walker also exposes the native powers
             // button. Match only EA's two known rows, not unrelated panels.
@@ -3740,6 +3741,130 @@ package olympus.core
          catch(e:Error) { this.mA11yActivating = false; }
       }
 
+      protected var mA11yGoalContent:DisplayObject = null;
+      protected var mA11yGoalScope:DisplayObject = null;
+      protected var mA11yGoalId:String = "";
+      protected var mA11yGoalZone:String = "";
+      protected var mA11yGoalUntil:int = 0;
+      protected var mA11yGoalCheck:int = 0;
+      protected var mA11yGoalVisits:int = 0;
+
+      public function A11yEventGoalFind(item:DisplayObject, id:String, depth:int = 0) : DisplayObject
+      {
+         if(item == null || depth > 16 || this.mA11yGoalVisits >= 2048) { return null; }
+         this.mA11yGoalVisits = this.mA11yGoalVisits + 1;
+         try
+         {
+            if(getQualifiedClassName(item).indexOf("widgets.Gameplay.SituationDisplay.controls::") == 0 && "Id" in item && String(Object(item)["Id"]) == id) { return item; }
+            var parent:DisplayObjectContainer = item as DisplayObjectContainer;
+            var index:int = 0;
+            if(parent != null)
+            {
+               while(index < parent.numChildren)
+               {
+                  var found:DisplayObject = this.A11yEventGoalFind(parent.getChildAt(index),id,depth + 1);
+                  if(found != null) { return found; }
+                  index = index + 1;
+               }
+            }
+         }
+         catch(e:Error) { }
+         return null;
+      }
+
+      public function A11yEventGoalClear() : void
+      {
+         try { this.mTooltipsLayer.removeEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame); }
+         catch(e:Error) { }
+         if(this.mA11yGoalScope != null)
+         {
+            if(this.mA11yPendingScope == this.mA11yGoalScope) { this.mA11yPendingScope = null; }
+            if(this.mA11yStatusScope == this.mA11yGoalScope) { this.mA11yStatusScope = null; }
+            if(this.mA11yScope == this.mA11yGoalScope) { this.A11yClearFocus(); this.mA11yScope = null; }
+         }
+         this.mA11yGoalContent = null; this.mA11yGoalScope = null;
+         this.mA11yGoalId = ""; this.mA11yGoalZone = "";
+      }
+
+      public function A11yEventGoalFrame(event:Event) : void
+      {
+         var now:int = getTimer();
+         if(now < this.mA11yGoalCheck) { return; }
+         this.mA11yGoalCheck = now + 200;
+         try
+         {
+            if(this.mA11yGoalContent == null || this.mA11yStatusScope != this.mA11yGoalScope || !this.mA11yKeyboard || now > this.mA11yKeyboardLease || now > this.mA11yGoalUntil || !this.A11yIsLive(this.mA11yGoalContent) || (this.mA11yGoalId.length > 0 && String(Object(this.mA11yGoalContent)["Id"]) != this.mA11yGoalId) || String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != this.mA11yGoalZone)
+            { this.A11yEventGoalClear(); }
+         }
+         catch(e:Error) { this.A11yEventGoalClear(); }
+      }
+
+      public function A11yEventGoals(parts:Array) : void
+      {
+         if(parts.length != 5) { return; }
+         var serial:String = String(parts[4]);
+         var zone:String = String(parts[3]);
+         var status:String = "unavailable";
+         try
+         {
+            this.A11yModalFrame();
+            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || this.A11yWorldHudMode() != 1 || this.mA11yActiveModalRoot != null) { status = "blocked"; }
+            else if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) == zone)
+            {
+               var root:DisplayObject = this.A11yLoadedWidget("SituationDisplay") as DisplayObject;
+               this.mA11yGoalVisits = 0;
+               var content:DisplayObject = this.A11yEventGoalFind(root,String(parts[2]));
+               if(this.A11yIsLive(root) && content != null && "mSituationGoalDisplay" in content)
+               {
+                  var ancestor:DisplayObject = content.parent;
+                  var depth:int = 0;
+                  while(ancestor != null && depth < 16)
+                  {
+                     if("OpenContentPanelWithId" in ancestor) { Object(ancestor)["OpenContentPanelWithId"](String(parts[2])); break; }
+                     ancestor = ancestor.parent; depth = depth + 1;
+                  }
+                  var goals:DisplayObject = Object(content)["mSituationGoalDisplay"] as DisplayObject;
+                  if(this.A11yIsLive(content) && goals != null && goals.visible)
+                  {
+                     this.A11yEventGoalClear();
+                     this.mA11yGoalContent = content; this.mA11yGoalScope = goals;
+                     this.mA11yGoalId = String(parts[2]); this.mA11yGoalZone = zone;
+                     this.mA11yGoalUntil = getTimer() + 300000; this.mA11yGoalCheck = 0;
+                     this.mA11yStatusScope = goals;
+                     this.A11yFocusInto(goals);
+                     this.mTooltipsLayer.addEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame,false,0,true);
+                     status = "opened";
+                  }
+               }
+            }
+         }
+         catch(e:Error) { status = "error"; }
+         // Running-event feature: this command is deliberately loaded-zone only.
+         this.A11yPostToPython("a11y.eventgoals_enc",encodeURIComponent(serial + "|" + zone + "|" + status));
+      }
+
+      public function A11yPhotography(param1:Object = null) : void
+      {
+         try
+         {
+            this.A11yModalFrame();
+            var camera:DisplayObject = this.A11yLoadedWidget("SimCamera") as DisplayObject;
+            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || !this.A11yIsLive(camera) || (this.mA11yActiveModalRoot != null && this.mA11yActiveModalRoot != camera && !this.A11yIsInside(camera,this.mA11yActiveModalRoot) && !this.A11yIsInside(this.mA11yActiveModalRoot,camera)))
+            {
+               this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); return;
+            }
+            this.A11yEventGoalClear();
+            this.mA11yGoalContent = camera; this.mA11yGoalScope = camera;
+            this.mA11yGoalId = "";
+            this.mA11yGoalZone = String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true));
+            this.mA11yGoalUntil = getTimer() + 300000; this.mA11yGoalCheck = 0;
+            this.mA11yStatusScope = camera;
+            this.A11yFocusInto(camera);
+            this.mTooltipsLayer.addEventListener(Event.ENTER_FRAME,this.A11yEventGoalFrame,false,0,true);
+         }
+         catch(e:Error) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
+      }
+
       public function A11yWants(param1:Object = null) : void
       {
          var hub:Object = this.A11yLoadedWidget("SimHub");
@@ -4052,6 +4177,7 @@ package olympus.core
       public function A11yHandleEncoded(param1:String) : void
       {
          var _loc2_:Array = param1.split("|");
+         if(_loc2_[1] == "eventgoals" && _loc2_.length == 5) { this.A11yEventGoals(_loc2_); return; }
          if(_loc2_[1] == "lotprice" && _loc2_.length == 4)
          {
             this.A11yLotRentalPrice(String(_loc2_[2]),String(_loc2_[3]));
@@ -4405,6 +4531,7 @@ package olympus.core
             CommunicationManager.AddMessageListenerByName("A11yInvItemActions",this.A11yInvItemActions,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yBuildGridOn",this.A11yBuildGridOnMsg,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yBuildGridOff",this.A11yBuildGridOffMsg,"A11yNarrator");
+            CommunicationManager.AddMessageListenerByName("A11yPhotography",this.A11yPhotography,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yWants",this.A11yWants,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yNeeds",this.A11yNeeds,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yToggle",this.A11yMsgToggle,"A11yNarrator");
@@ -5093,6 +5220,37 @@ package olympus.core
                return;
             }
          }
+         if(_loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || _loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || _loc7_ == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
+         {
+            _loc6_ = param1.getBounds(param1.stage);
+            if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(param1) || this.A11yCanRevealOnStage(param1)) && this.A11yInListViewport(param1)) { param2.push(param1); }
+            return;
+         }
+
+         // Compound cards retain their readable row and expose only native
+         // child actions. No action is synthesized for Social Bunny text rows.
+         var childActions:Array = null;
+         if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
+         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView") { childActions = ["btnReaction","btnAddFriend","mcReactionsGrid"]; }
+         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView") { childActions = ["btnReaction","mcReactionsGrid"]; }
+         else if(_loc7_ == "widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView") { childActions = ["btnDetails","btnAction"]; }
+         else if(_loc7_ == "widgets.Exchange.Subscriptions.controls::SubscriptionCellView") { childActions = ["btnFollow","btnBlock","btnUnblock"]; }
+         else if(_loc7_ == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitCellView") { childActions = ["btnTravel","btnViewAgreement","btnFillVacancy"]; }
+         else if(_loc7_ == "widgets.GameEntry.HouseholdPanel.controls::HouseholdPanelCellView") { childActions = ["btnUserHH","btnDelete","btnStoryProgression"]; }
+         if(childActions != null)
+         {
+            _loc6_ = param1.getBounds(param1.stage);
+            if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(param1) || this.A11yCanRevealOnStage(param1)) && this.A11yInListViewport(param1)) { param2.push(param1); }
+            var childIndex:int = 0;
+            while(childIndex < childActions.length)
+            {
+               var childName:String = String(childActions[childIndex]);
+               if(childName in param1) { this.A11yCollectFocusables(Object(param1)[childName] as DisplayObject,param2,param3 + 1); }
+               childIndex = childIndex + 1;
+            }
+            return;
+         }
+
          // Business employee cells (BusinessEmployeeManagement, used by
          // retail stores and the WickedWhims strip club): a Sim to hire is
          // the cell itself; a current employee's cell is disabled but holds
@@ -6630,6 +6788,9 @@ package olympus.core
          // grid. Only the child button emits EA's mainRowClick event; focus
          // both it and visible serving buttons instead of the inert wrapper.
          if(getQualifiedClassName(item) == "widgets.Pickers.controls.GridPicker::RowCellView") { return true; }
+         if(getQualifiedClassName(item) == "widgets.Gameplay.SocialMedia::SocialMediaMessageCellView") { return true; }
+         // Native dialog rows wrap the actual editable TextField.
+         if(getQualifiedClassName(item) == "widgets.Dialog.controls::TextInputCellView" || getQualifiedClassName(item) == "widgets.Dialog.controls::InlineTextInputCellView") { return true; }
          // These rank rows wrap the real, game-validated ability buttons.
          // Treating the CellView wrapper as a choice hides every power in
          // the nested grids (including werewolf and fairy abilities).
@@ -7737,6 +7898,12 @@ package olympus.core
                this.A11yClearFocus();
                return;
             }
+            var readClass:String = getQualifiedClassName(_loc2_);
+            if(readClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaReactionCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
+            {
+               this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return;
+            }
+
             if(this.A11yActionProxy(_loc2_) != _loc2_)
             {
                // A disabled proxied control (a child's calendar Add Event) used to
@@ -7756,6 +7923,7 @@ package olympus.core
             // A toggled picker row reads its new state through the existing
             // settled reread (no new listener); EA applies the toggle this frame.
             if(this.A11yPickerToggleCell(_loc2_)) { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
+            else if(getQualifiedClassName(_loc2_) == "widgets.Gameplay.SimCamera.controls::CameraFilterCellView" || getQualifiedClassName(_loc2_) == "widgets.Gameplay.SituationCreation.controls::LocationCellView") { this.mA11yFocusPending = _loc2_; this.mA11yFocusDue = getTimer() + 150; }
             this.mA11yActivating = false;
             this.mA11yList = null;
             if(confirm && this.mA11ySimplifiedMenus && this.A11yConfirmSinglePicker(_loc2_)) { this.mA11yFocusPending = null; return; }
@@ -7866,6 +8034,7 @@ package olympus.core
                return this.A11yCheckboxState(Object(param1.parent)["btnCheckBox"]);
             }
             _loc2_ = getQualifiedClassName(param1);
+            if(_loc2_ == "widgets.Gameplay.SimCamera.controls::CameraFilterCellView" || _loc2_ == "widgets.Gameplay.SituationCreation.controls::LocationCellView") { return Object(param1)["Selected"] == true ? "checked" : "unchecked"; }
             if(this.A11yPickerToggleCell(param1))
             {
                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
@@ -8277,6 +8446,36 @@ package olympus.core
                if("txtRestartRequiredLabel" in param1) { this.A11yCollectText(Object(param1)["txtRestartRequiredLabel"] as DisplayObject,_loc2_,0,param7); }
             }
             if(param6 == "a11y.widget_enc" || param6 == "a11y.focus_enc") { this.A11yRentalQuote(param1,_loc2_); this.A11yMoveInQuote(param1,_loc2_); this.A11yTransferQuote(param1,_loc2_); this.A11yMoveLabel(param1,_loc2_); this.A11yOptionsRowLabel(param1,_loc2_); }
+            if(param6 == "a11y.widget_enc" || param6 == "a11y.focus_enc")
+            {
+               var socialParent:DisplayObject = param1.parent;
+               if(socialParent != null)
+               {
+                  var socialClass:String = getQualifiedClassName(socialParent);
+                  if(socialClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || socialClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || socialClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView")
+                  {
+                     if("txtSimName" in socialParent && Object(socialParent)["txtSimName"] != null) { _loc2_.push("-999998|0|" + String(Object(socialParent)["txtSimName"].text)); }
+                     if("txtPostContent" in socialParent && Object(socialParent)["txtPostContent"] != null) { _loc2_.push("-999997|0|" + String(Object(socialParent)["txtPostContent"].text).substr(0,240)); }
+                  }
+               }
+            }
+
+            if(param1 is TextField && TextField(param1).type == "input")
+            {
+               var inputParent:DisplayObject = param1.parent;
+               var inputDepth:int = 0;
+               while(inputParent != null && inputDepth < 6)
+               {
+                  var inputClass:String = getQualifiedClassName(inputParent);
+                  if(inputClass == "widgets.Dialog.controls::TextInputCellView" || inputClass == "widgets.Dialog.controls::InlineTextInputCellView")
+                  {
+                     if("txtLabel" in inputParent && Object(inputParent)["txtLabel"] != null) { _loc2_.push("-999999|0|" + String(Object(inputParent)["txtLabel"].text)); }
+                     break;
+                  }
+                  inputParent = inputParent.parent; inputDepth = inputDepth + 1;
+               }
+            }
+
             _loc7_ = this.A11yMapLabel(param1);
             if(_loc7_.length > 0) { _loc2_ = ["0|0|" + _loc7_]; }
             if("A11yMotiveText" in param1) { _loc2_ = ["0|0|" + Object(param1)["A11yMotiveText"]()]; }

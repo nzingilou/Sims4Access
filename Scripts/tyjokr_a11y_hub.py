@@ -27,6 +27,7 @@ PANELS = (
     ('social groups', 'OpenSimInfoClubPanel'),
     ('owned businesses', 'OpenHouseholdInfoVenuePanel'),
     ('calendar', 'ShowCalendar'),
+    ('photography controls', 'A11yPhotography'),
 )
 
 
@@ -592,7 +593,9 @@ def event_actions(situation_id):
     manager, situation = _event(situation_id)
     if situation is None:
         return False
-    rows = [(menu._raw(lang.t('send guests home and end event')), None,
+    rows = [(menu._raw(lang.t('current event goals')), None,
+             lambda: event_goals(situation_id)),
+            (menu._raw(lang.t('send guests home and end event')), None,
              lambda: end_event(situation_id, send_home=True, end=True)),
             (menu._raw(lang.t('end event')), None,
              lambda: end_event(situation_id, send_home=False, end=True)),
@@ -600,6 +603,11 @@ def event_actions(situation_id):
              lambda: end_event(situation_id, send_home=True, end=False))]
     return _window('events', 'event actions instructions', rows,
                    localized_title=getattr(situation, 'display_name', None))
+
+
+def event_goals(situation_id):
+    import tyjokr_a11y_event_goals as goals
+    return goals.open_goals(situation_id)
 
 
 def end_event(situation_id, send_home, end):
