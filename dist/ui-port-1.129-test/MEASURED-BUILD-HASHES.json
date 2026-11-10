@@ -10,20 +10,25 @@
   ],
   "unchanged_entries": 60,
   "python": "3.7.9",
-  "script_sha256": "7532536027775320a66ea9c666fc67bad6f19725acc9ed2884e41dac1d3cc577",
+  "script_sha256": "df3e61758afbaac124db60212f5845938048fb9aacb987d89371cb70fc368c25",
   "status": "candidate; native in-game validation pending",
   "files": {
-    "TS4_Access.ts4script": "7532536027775320a66ea9c666fc67bad6f19725acc9ed2884e41dac1d3cc577",
-    "TS4_Access_UI.package": "65c78a47ac169a35144194385b047a0eb2a71f2b93a98f5bd6d86fa8f83f14c7",
+    "TS4_Access.ts4script": "df3e61758afbaac124db60212f5845938048fb9aacb987d89371cb70fc368c25",
+    "TS4_Access_UI.package": "f5c0065abeb8fd3630d76fd9ef3c8784ac9cd5cd0779b06ff147305a1ebe877a",
     "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
   },
   "validation": {
-    "passing_suites": 117,
-    "reported_checks": 1570,
-    "environment_timeout": "unchanged PowerShell prelaunch helper",
-    "compiled_adapter_tests": 31,
-    "compiled_handler_copies": 29,
-    "ui_pipeline": "passed",
-    "in_game": "Ground-floor rooms validated; upper-floor helper fix installed, retest pending"
+    "passed": false,
+    "input_stable": true,
+    "passing_suites": 120,
+    "suites": 121,
+    "reported_checks": 1618,
+    "failure": "Unchanged PowerShell prelaunch helper timeout",
+    "compiled_helper_checks": 22,
+    "native_bridge_checks": 6,
+    "main_fidelity_gate": "passed, 25 movies, 62 targeted-class comparisons",
+    "main_structure": "all class sets and exact non-code tags unchanged",
+    "compatibility": "unchanged bytes; prior fidelity gate passed",
+    "in_game": "Ground-floor and upper-floor room footprints verified in previous build. Native-floor/stair-isolation candidate awaits live confirmation."
   }
 }

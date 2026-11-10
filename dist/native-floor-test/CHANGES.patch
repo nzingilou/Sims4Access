@@ -1,0 +1,415 @@
+diff --git a/Scripts/tyjokr_a11y_build_helpers.py b/Scripts/tyjokr_a11y_build_helpers.py
+index d3e975c..c384013 100644
+--- a/Scripts/tyjokr_a11y_build_helpers.py
++++ b/Scripts/tyjokr_a11y_build_helpers.py
+@@ -2,6 +2,16 @@
+ import contextlib
+ import math
+ import time
++import threading
++
++_floor_lock = threading.Lock()
++_floor_job = None
++_floor_sequence = -1
++_floor_quarantined = False
++_original_house_build = None
++_original_house_stairs = None
++_planner = None
++_house_context = threading.local()
+ 
+ _build = None
+ _coordinates = None
+@@ -21,9 +31,8 @@ def _state():
+         raise RuntimeError('Close the game dialog before changing floors')
+     lot = services.active_lot()
+     if lot is None: raise RuntimeError('No active lot')
+-    floor = _build.current_floor()
+-    if floor is None: raise RuntimeError('The game has not reported its current floor')
+-    return {'zone': int(services.current_zone_id()), 'floor': int(floor),
++    floor = None  # Camera position is not a native floor number.
++    return {'zone': int(services.current_zone_id()), 'floor': floor,
+             'center': (float(lot.center.x), float(lot.center.z)),
+             'grid': bool(grid.build_cursor()), 'owner': bool(keys._build_grid_owner)}
+ 
+@@ -83,8 +92,51 @@ def _floor_input(state):
+             _log('floor-ownership-restored', zone=state['zone'], restored=bool(restored))
+ 
+ 
++def _receive_floor(zone, sequence, status, current, minimum, maximum):
++    """Simulation-thread reply from the single native ControlPanel definer."""
++    global _floor_sequence
++    job = _floor_job
++    if job is None or job['done'].is_set() or str(zone) != str(job['zone']): return
++    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= _floor_sequence: return
++    _floor_sequence = sequence
++    if status != 'ok':
++        job['error'] = 'Native floor query: ' + str(status)
++    elif (any(isinstance(v, bool) or not isinstance(v, int) for v in (current, minimum, maximum))
++          or not -64 <= minimum <= current <= maximum <= 64):
++        job['error'] = 'Invalid native floor bounds'
++    else:
++        job['result'] = {'floor': current, 'minimum': minimum, 'maximum': maximum}
++    job['done'].set()
++
++
++def _native_floor(state, timeout=3.0):
++    """One outstanding read-only query; quarantine after timeout, never reuse late replies."""
++    global _floor_job, _floor_quarantined
++    if _floor_quarantined: raise RuntimeError('Native floor channel timed out; restart the game before retrying')
++    if not _floor_lock.acquire(False): raise RuntimeError('Another native floor query is active')
++    try:
++        job = {'zone': state['zone'], 'done': threading.Event()}
++        _floor_job = job
++        def send():
++            if not _same_world(state): raise RuntimeError('Build context changed before the native query')
++            _build._send_ui('A11yNativeFloorQuery')
++            return True
++        if _build.on_main(send) is not True:
++            _floor_quarantined = True
++            raise RuntimeError('Native floor query could not be dispatched')
++        if not job['done'].wait(timeout):
++            _floor_quarantined = True
++            raise RuntimeError('Native floor UI did not answer; install the matching UI package')
++        if 'error' in job: raise RuntimeError(job['error'])
++        if not _build.on_main(_same_world, state): raise RuntimeError('Build context changed during the native query')
++        return job['result']
++    finally:
++        _floor_job = None
++        _floor_lock.release()
++
++
+ def set_floor(level):
+-    """Change the native floor without feeding Page Up/Down to the grid."""
++    """Use BBGetLevelInfo, never camera height, to verify native floor keys."""
+     try:
+         if isinstance(level, bool) or not isinstance(level, (int, float)) or not math.isfinite(level) or int(level) != level:
+             return False
+@@ -94,23 +146,24 @@ def set_floor(level):
+     try:
+         state = _build.on_main(_state)
+         if state is None: raise RuntimeError('Simulation thread did not answer')
++        info = _native_floor(state)
++        state['floor'] = info['floor']
++        _log('floor-query', wanted=level, **info)
++        if not info['minimum'] <= level <= info['maximum']:
++            _log('floor-out-of-range', wanted=level, **info)
++            return False
+         if state['floor'] == level: return True
+         with _floor_input(state) as (u, geometry):
+-            unchanged = 0
+-            previous = state['floor']
+-            for _ in range(min(64, 3 * (abs(level - previous) + 1))):
++            for _ in range(abs(level - state['floor'])):
+                 if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
+                     raise RuntimeError('Game focus, window or Build context changed')
+-                if not _build.on_main(_grid_released):
+-                    raise RuntimeError('The grid reclaimed the floor keys')
++                if not _build.on_main(_grid_released): raise RuntimeError('The grid reclaimed the floor keys')
+                 if any(u.GetAsyncKeyState(key) & 0x8000 for key in (16,17,18,91,92)):
+                     raise RuntimeError('Release modifier keys before changing floors')
+-                current = _build.on_main(_build.current_floor)
+-                if current is None: raise RuntimeError('Native floor unavailable')
+-                if current == level:
+-                    _log('floor-confirmed', wanted=level, actual=current)
+-                    return True
+-                key, scan = (33, 0x49) if current < level else (34, 0x51)
++                current = _native_floor(state)['floor']
++                if current == level: return True
++                step = 1 if current < level else -1
++                key, scan = (33, 0x49) if step > 0 else (34, 0x51)
+                 if (not _build.on_main(_same_world, state) or _coordinates.window(u) != geometry
+                         or u.GetAsyncKeyState(key) & 0x8000):
+                     raise RuntimeError('Input context changed before the floor key')
+@@ -120,29 +173,72 @@ def set_floor(level):
+                     time.sleep(.05)
+                 finally:
+                     if pressed: u.keybd_event(key, scan, 3, 0)
+-                time.sleep(1.25)
+-                actual = _build.on_main(_build.current_floor)
+-                _log('floor-step', wanted=level, before=current, actual=actual)
+-                unchanged = unchanged + 1 if actual == current else 0
++                actual = current
++                # Wait for one key acknowledgement; never stack unacknowledged keys.
++                for poll in range(30):
++                    time.sleep(.1)
++                    if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
++                        raise RuntimeError('Build context changed while waiting for the floor')
++                    actual = _native_floor(state)['floor']
++                    if actual != current: break
++                _log('floor-step', wanted=level, before=current, actual=actual, source='BBGetLevelInfo')
++                if actual != current + step: return False
+                 if actual == level: return True
+-                if actual is None or unchanged >= 3: return False
+             return False
+     except Exception as exc:
+         _log('floor-refused', wanted=level, error=str(exc))
+         return False
+ 
+ 
++def _house_build(plan):
++    """Scope stacked stairs to the running plan, even after a failed room."""
++    planner = _planner
++    if planner is None: return _original_house_build(plan)
++    _house_context.transitions = tuple(getattr(plan, '_a11y_transitions', ()))
++    planner._pending_stairs = []
++    try:
++        return _original_house_build(plan)
++    finally:
++        planner._pending_stairs = []
++        _house_context.transitions = ()
++
++
++def _stairs_for_plan(top, climb):
++    planner = _planner
++    transitions = getattr(_house_context, 'transitions', ())
++    if planner is None or not transitions: return _original_house_stairs(top, climb)
++    for stair_top, stair_climb, lower, upper in transitions:
++        result = planner._place_stair_at(stair_top, stair_climb, lower)
++        _log('stair-transition', lower=lower, upper=upper, result=result)
++        if result is not True: return result
++    return True
++
++
+ def _build_menu():
+     import tyjokr_a11y_plus_build as build
+     return build.open_menu()
+ 
+ 
+ def install():
+-    global _build, _coordinates
++    global _build, _coordinates, _original_house_build, _original_house_stairs, _planner
+     import tyjokr_a11y_plus_build as build
+     import tyjokr_a11y_plus_core as core
+     import tyjokr_a11y_build_coordinates as coordinates
+     if getattr(build, '_helper_integration_installed', False): return
++    import sims4.commands
++    import tyjokr_a11y_plus_house as house
++    def receive(zone: str='', sequence: int=0, status: str='', current: int=0, minimum: int=0, maximum: int=0, _connection=None):
++        _receive_floor(zone, sequence, status, current, minimum, maximum)
++    sims4.commands.Command('a11y.floor_native', command_type=sims4.commands.CommandType.Live)(receive)
++    try:
++        import tyjokr_a11y_house_planner as planner
++    except ImportError:
++        planner = None
++    _planner = planner
++    _original_house_stairs = planner._original_stairs if planner is not None else house.place_stairs_worker
++    _original_house_build = house._build
++    house._build = _house_build
++    house.place_stairs_worker = _stairs_for_plan
+     _build, _coordinates = build, coordinates
+     build.set_floor = set_floor
+     # Roof tools registered Alt+B before the detached wrapper loaded. Resolve
+diff --git a/docs/development/changes/native-floor-and-stair-isolation.md b/docs/development/changes/native-floor-and-stair-isolation.md
+new file mode 100644
+index 0000000..fb93945
+--- /dev/null
++++ b/docs/development/changes/native-floor-and-stair-isolation.md
+@@ -0,0 +1,8 @@
++# Native floors and isolated stair plans
++
++- Build helpers verify floor changes using the game's BBGetLevelInfo (current/minimum/maximum), rather than inferring a floor from camera height. One key is acknowledged before another is sent; out-of-range floors and unanswered queries stop construction.
++- Stair transitions belong to the running house plan and are cleared on every exit. Failed stacked/basement plans cannot change the stairs in a later ordinary house.
++
++Changed code: Scripts/tyjokr_a11y_build_helpers.py (native query transport, set_floor, house/stair wrappers, install); flash/extra-classes/ControlPanel.as (one read-only message listener and A11yNativeFloorQuery, next to RefreshFloorData).
++
++Only the helper bytecode and GameTray UI resource change. UI Cheats compatibility is unchanged. Live confirmation of complete door/stair placement is pending.
+diff --git a/flash/extra-classes/ControlPanel.as b/flash/extra-classes/ControlPanel.as
+index 2ba5d47..b8640e5 100644
+--- a/flash/extra-classes/ControlPanel.as
++++ b/flash/extra-classes/ControlPanel.as
+@@ -394,6 +394,7 @@ package widgets.GameTray.controls
+          CommunicationManager.AddMessageListener("A11yTravelResult",this.A11yHandleTravelResult,this);
+          CommunicationManager.AddMessageListener("GoToShare",this.HandleGoToShare,this);
+          CommunicationManager.AddMessageListener("RefreshModeControl",this.HandleRefreshModeControl,this);
++         CommunicationManager.AddMessageListener("A11yNativeFloorQuery",this.A11yNativeFloorQuery,this);
+          CommunicationManager.AddMessageListener("BBRefreshLevelData",this.RefreshFloorData,this);
+          CommunicationManager.AddMessageListener("BBUpdateWallViewMode",this.RefreshWallData,this);
+          CommunicationManager.AddMessageListener("ShowCameraControl",this.HandleShowCameraControl,this);
+@@ -2131,6 +2132,46 @@ package widgets.GameTray.controls
+          this.mbIgnoreBuildBuyLockUnlock = CommunicationManager.CallGameService("IsForceFreeBuild",null,true) as Boolean;
+       }
+       
++      // Read-only: the same authoritative data used by RefreshFloorData.
++      protected var mA11yFloorQuerySequence:int = 0;
++
++      public function A11yNativeFloorQuery(param1:Object = null) : void
++      {
++         this.mA11yFloorQuerySequence = this.mA11yFloorQuerySequence + 1;
++         var status:String = "unavailable";
++         var zone:String = "0";
++         var current:int = 0;
++         var minimum:int = 0;
++         var maximum:int = 0;
++         try
++         {
++            zone = String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true));
++            if(this.mGameState == GameStates.BUILD && !GameStateFlags.IsBetweenStates)
++            {
++               var info:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
++               if(info != null && info.hasOwnProperty("curLevel") && info.hasOwnProperty("minLevel") && info.hasOwnProperty("maxLevel"))
++               {
++                  var c:Number = Number(info["curLevel"]);
++                  var lo:Number = Number(info["minLevel"]);
++                  var hi:Number = Number(info["maxLevel"]);
++                  if(typeof info["curLevel"] == "number" && typeof info["minLevel"] == "number" && typeof info["maxLevel"] == "number" && isFinite(c) && isFinite(lo) && isFinite(hi) && int(c) == c && int(lo) == lo && int(hi) == hi && lo >= -64 && hi <= 64 && lo <= c && c <= hi)
++                  {
++                     current = int(c); minimum = int(lo); maximum = int(hi); status = "ok";
++                  }
++               }
++            }
++         }
++         catch(e:Error) { status = "error"; }
++         try
++         {
++            CommunicationManager.CallGameService("PostServerCommand",{
++               "command":"a11y.floor_native",
++               "commandArgs":[zone,this.mA11yFloorQuerySequence,status,current,minimum,maximum]
++            });
++         }
++         catch(replyError:Error) { }
++      }
++
+       public function RefreshFloorData(param1:Object = null) : void
+       {
+          var _loc2_:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
+diff --git a/tools/test_build_helpers.py b/tools/test_build_helpers.py
+index 521fec5..fb0456e 100644
+--- a/tools/test_build_helpers.py
++++ b/tools/test_build_helpers.py
+@@ -17,7 +17,7 @@ class Tests(unittest.TestCase):
+   def measure(*args):self.events.append('roundtrip');self.released=True
+   self.coords=types.SimpleNamespace(_api=lambda:self.u,physical_context=physical,window=lambda u:self.geometry,_measure=measure)
+   h._build,h._coordinates=self.build,self.coords
+-  self.patches=[patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
++  self.patches=[patch.object(h,'_native_floor',side_effect=lambda state:{'floor':self.floor,'minimum':-4,'maximum':4}),patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
+   for p in self.patches:p.start();self.addCleanup(p.stop)
+  def key(self,key,scan,flags,extra):
+   self.events.append(('key',key,scan,flags))
+@@ -45,9 +45,9 @@ class Tests(unittest.TestCase):
+   self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
+  def test_modifier_keys_are_never_borrowed(self):
+   self.modifier=True;self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
+- def test_floor_boundary_stops_after_three_unchanged_attempts(self):
++ def test_floor_boundary_stops_without_repeating_unacknowledged_key(self):
+   self.stall=True;self.assertFalse(h.set_floor(1))
+-  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),3)
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
+  def test_key_up_survives_failure_after_key_down(self):
+   h.time.sleep.side_effect=RuntimeError('interrupted')
+   self.assertFalse(h.set_floor(1));self.assertIn(('key',33,0x49,3),self.events);self.assertIn('restore-grid',self.events)
+@@ -58,4 +58,77 @@ class Tests(unittest.TestCase):
+   build=types.SimpleNamespace(open_menu=Mock(return_value='detached'))
+   with patch.dict(sys.modules,tyjokr_a11y_plus_build=build):
+    self.assertEqual(h._build_menu(),'detached');build.open_menu=Mock(return_value='colors');self.assertEqual(h._build_menu(),'colors')
++ def test_camera_estimate_cannot_override_native_floor(self):
++  self.state['floor']=-1
++  self.assertTrue(h.set_floor(0));self.assertEqual(self.events,[])
++ def test_out_of_native_bounds_never_sends_input(self):
++  h._native_floor.side_effect=lambda state:{'floor':0,'minimum':0,'maximum':3}
++  self.assertFalse(h.set_floor(-1));self.assertEqual(self.events,[])
++ def test_unexpected_native_jump_stops_before_another_key(self):
++  original=self.u.keybd_event
++  def jump(key,scan,flags,extra):
++   original(key,scan,flags,extra)
++   if flags==3:self.floor=2
++  self.u.keybd_event=jump
++  self.assertFalse(h.set_floor(1))
++  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
++ def test_stair_plan_cleanup_after_early_failure(self):
++  planner=types.SimpleNamespace(_pending_stairs=['stale basement'])
++  plan=types.SimpleNamespace(_a11y_transitions=[('new',0,1)])
++  def fail(p):
++   self.assertEqual(h._house_context.transitions,tuple(plan._a11y_transitions))
++   raise RuntimeError('room failed')
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_build',side_effect=fail):
++   with self.assertRaises(RuntimeError):h._house_build(plan)
++  self.assertEqual(planner._pending_stairs,[])
++ def test_ordinary_house_discards_abandoned_basement_stairs(self):
++  planner=types.SimpleNamespace(_pending_stairs=['basement'])
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_build',side_effect=lambda p:self.assertEqual(planner._pending_stairs,[])):
++   h._house_build(types.SimpleNamespace())
++  self.assertEqual(planner._pending_stairs,[])
++
++class TransportTests(unittest.TestCase):
++ def setUp(self):
++  h._floor_job=None;h._floor_sequence=-1;h._floor_quarantined=False
++  h._build=types.SimpleNamespace(on_main=lambda fn,*args:fn(*args),_send_ui=lambda msg:h._receive_floor('9',1,'ok',1,-2,4))
++  self.guard=patch.object(h,'_same_world',return_value=True);self.guard.start();self.addCleanup(self.guard.stop)
++ def tearDown(self):
++  h._floor_job=None;h._floor_sequence=-1;h._floor_quarantined=False
++ def test_query_accepts_authoritative_snapshot(self):
++  self.assertEqual(h._native_floor({'zone':9}),{'floor':1,'minimum':-2,'maximum':4})
++ def test_timeout_quarantines_channel_and_ignores_late_reply(self):
++  h._build._send_ui=Mock()
++  with self.assertRaises(RuntimeError):h._native_floor({'zone':9},timeout=0)
++  self.assertTrue(h._floor_quarantined)
++  h._receive_floor('9',1,'ok',0,-2,4)
++  with self.assertRaises(RuntimeError):h._native_floor({'zone':9},timeout=0)
++  self.assertEqual(h._build._send_ui.call_count,1)
++ def test_wrong_zone_and_old_sequence_cannot_complete_request(self):
++  h._floor_sequence=5
++  def reply(msg):
++   h._receive_floor('8',6,'ok',0,-2,4);self.assertFalse(h._floor_job['done'].is_set())
++   h._receive_floor('9',5,'ok',0,-2,4);self.assertFalse(h._floor_job['done'].is_set())
++   h._receive_floor('9',6,'ok',2,-2,4)
++  h._build._send_ui=reply
++  self.assertEqual(h._native_floor({'zone':9})['floor'],2)
++ def test_invalid_bounds_and_native_refusal_never_become_floor_zero(self):
++  for status,current,low,high in [('ok',2,3,4),('ok',False,-2,4),('unavailable',0,0,0)]:
++   h._floor_sequence=-1
++   h._build._send_ui=lambda msg:h._receive_floor('9',1,status,current,low,high)
++   with self.assertRaises(RuntimeError):h._native_floor({'zone':9})
++ def test_overlapping_query_is_refused(self):
++  h._floor_lock.acquire()
++  try:
++   with self.assertRaises(RuntimeError):h._native_floor({'zone':9})
++  finally:h._floor_lock.release()
++ def test_plan_stairs_use_thread_local_plan_not_global_pending(self):
++  planner=types.SimpleNamespace(_pending_stairs=['stale'],_original_stairs=Mock(return_value=True),_place_stair_at=Mock(return_value=True))
++  h._house_context.transitions=(((3,4),(1,0),0,1),)
++  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_stairs',planner._original_stairs),patch.object(h,'_log'):
++   self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
++   planner._place_stair_at.assert_called_once_with((3,4),(1,0),0)
++   planner._original_stairs.assert_not_called()
++   h._house_context.transitions=()
++   self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
++   planner._original_stairs.assert_called_once_with((0,0),(0,1))
+ if __name__=='__main__':unittest.main()
+diff --git a/tools/test_native_floor_bridge.js b/tools/test_native_floor_bridge.js
+new file mode 100644
+index 0000000..44baff2
+--- /dev/null
++++ b/tools/test_native_floor_bridge.js
+@@ -0,0 +1,32 @@
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert');
++const src=fs.readFileSync(path.join(__dirname,'../flash/extra-classes/ControlPanel.as'),'utf8');
++const match=/public function A11yNativeFloorQuery\(([^)]*)\)\s*:\s*void\s*\{/.exec(src);assert(match);
++let at=match.index+match[0].length,end=at,depth=1;
++while(depth){if(src[end]==='{')depth++;if(src[end]==='}')depth--;end++;}
++const strip=s=>s.replace(/:\s*(?:Object|String|Number|Error|int)\b/g,'');
++let count=0;
++function fixture(info={curLevel:1,minLevel:-2,maxLevel:4}){
++ const calls=[],ui={mA11yFloorQuerySequence:0,mGameState:2},flags={IsBetweenStates:false};
++ const runtime={GameStates:{BUILD:2},GameStateFlags:flags,Number,String,isFinite,int:Math.trunc,
++ CommunicationManager:{CallGameService(name,data){calls.push([name,data]);if(name==='BBGetCurrentZoneId')return '18446744073709551600';if(name==='BBGetLevelInfo')return info;}}};
++ ui.query=vm.runInNewContext('(function('+strip(match[1])+'){'+strip(src.slice(at,end-1))+'})',runtime).bind(ui);
++ return {ui,calls,flags};
++}
++function reply(f){return f.calls.filter(([n])=>n==='PostServerCommand').pop()[1];}
++function test(name,fn){fn();count++;console.log('PASS '+name);}
++test('native level, bounds and exact zone are returned without mutating game state',()=>{
++ const f=fixture();f.ui.query();const r=reply(f);assert.equal(r.command,'a11y.floor_native');assert.deepEqual(Array.from(r.commandArgs),['18446744073709551600',1,'ok',1,-2,4]);
++ assert(f.calls.every(([n])=>['BBGetLevelInfo','BBGetCurrentZoneId','PostServerCommand'].includes(n)));
++});
++test('sequence increases once per query',()=>{const f=fixture();f.ui.query();f.ui.query();assert.equal(reply(f).commandArgs[1],2);});
++test('outside Build mode returns unavailable without querying level data',()=>{const f=fixture();f.ui.mGameState=1;f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');assert(!f.calls.some(([n])=>n==='BBGetLevelInfo'));});
++test('transition guard avoids querying changing world',()=>{const f=fixture();f.flags.IsBetweenStates=true;f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');});
++test('missing, fractional, boolean and inconsistent values are never floor zero',()=>{
++ for(const data of [null,{}, {curLevel:false,minLevel:0,maxLevel:4},{curLevel:1.5,minLevel:0,maxLevel:4},{curLevel:2,minLevel:3,maxLevel:4},{curLevel:NaN,minLevel:0,maxLevel:4}]){const f=fixture(data);f.ui.query();assert.equal(reply(f).commandArgs[2],'unavailable');}
++});
++test('single native listener and no native floor setter or cursor injection',()=>{
++ assert.equal((src.match(/AddMessageListener\("A11yNativeFloorQuery"/g)||[]).length,1);
++ const body=src.slice(at,end);for(const forbidden of ['BBSetLevel','keybd_event','SetVirtualCursorPosition','SendVirtualCursorClick'])assert(!body.includes(forbidden));
++});
++console.log(count+' native floor bridge checks passed (native service mocked).');

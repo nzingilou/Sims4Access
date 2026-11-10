@@ -1,0 +1,31 @@
+{
+  "git_base": "16d0a54",
+  "patch_sha256": "6d8a2b1419a4ad699a2e5a4f0a98df3ff1756c5be311ea4383e050cb81d1deeb",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_build_helpers.py",
+      "before_sha256": "9beabef57c4e4f5a5c4f88c66b6c855189c60710fc72aec5f5459e947d91f0dd",
+      "after_sha256": "c852206e9d0bbd3f4a7493762de67f5c25a61ebe33eafaa4b689326cf1c3362c"
+    },
+    {
+      "path": "flash/extra-classes/ControlPanel.as",
+      "before_sha256": "6db1f1208b3e2201e330700427e0e0f49c4d3f08eddfea4a6f720acfa5922ce3",
+      "after_sha256": "63a0aacf862c2de4aa30784a232be7d9e0700d00607f18ff50473500813a2186"
+    },
+    {
+      "path": "tools/test_build_helpers.py",
+      "before_sha256": "5783140708605d626317cf8079c3b5c574e7383de1925eaaab04f6f23248a0a1",
+      "after_sha256": "caad5ef4da1e6e7a9e14f4590375a834d267ab5c3ffec51292f25e0c6ca2ccac"
+    },
+    {
+      "path": "tools/test_native_floor_bridge.js",
+      "before_sha256": null,
+      "after_sha256": "8024ab1f41a9022aa852a796430ca61b78b648172f20c9baa48d49af3f62753d"
+    },
+    {
+      "path": "docs/development/changes/native-floor-and-stair-isolation.md",
+      "before_sha256": null,
+      "after_sha256": "c3addfd94f3832712a784c7bffd653732cdf77e3cd01f2d32453faeaecfe677e"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "base_commit": "16d0a54",
+  "base_script_sha256": "7532536027775320a66ea9c666fc67bad6f19725acc9ed2884e41dac1d3cc577",
+  "script_sha256": "df3e61758afbaac124db60212f5845938048fb9aacb987d89371cb70fc368c25",
+  "changed_entries": [
+    "tyjokr_a11y_build_helpers.pyc"
+  ],
+  "unchanged_entries": 62,
+  "python": "3.7.9",
+  "in_game_validation": "pending",
+  "files": {
+    "TS4_Access.ts4script": "df3e61758afbaac124db60212f5845938048fb9aacb987d89371cb70fc368c25",
+    "TS4_Access_UI.package": "f5c0065abeb8fd3630d76fd9ef3c8784ac9cd5cd0779b06ff147305a1ebe877a"
+  },
+  "required_unchanged_compat_sha256": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708",
+  "ui_changed_resources": [
+    "GameTray"
+  ],
+  "ui_unchanged_resources": 24,
+  "validation": {
+    "passed": false,
+    "input_stable": true,
+    "passing_suites": 120,
+    "suites": 121,
+    "reported_checks": 1618,
+    "failure": "Unchanged PowerShell prelaunch helper timeout",
+    "compiled_helper_checks": 22,
+    "native_bridge_checks": 6,
+    "main_fidelity_gate": "passed, 25 movies, 62 targeted-class comparisons",
+    "main_structure": "all class sets and exact non-code tags unchanged",
+    "compatibility": "unchanged bytes; prior fidelity gate passed"
+  }
+}
