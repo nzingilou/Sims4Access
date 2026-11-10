@@ -341,3 +341,13 @@ Each basement room is drawn from ground level with the native Basement Tool;
 its floor, complete rectangular footprint and unchanged existing rooms must
 be verified before the helper continues to the next room, doors or stairs.
 
+UNIFIED HOUSE BUILDER
+
+Alt+B, Build my house: start with an original ready-made layout, design a
+square or rectangle, or choose the original room list. All routes use one
+review screen. Choose Stories and basement to repeat aligned floor layouts.
+Choose Rooms, positions and custom names to edit one room at a time.
+Descriptions give the actual compass position and street-facing/rear role.
+Construction starts only after selecting Build this house in the review.
+The separate Configurable stacked house row is replaced by this flow.
+

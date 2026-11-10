@@ -1,0 +1,41 @@
+{
+  "git_base": "a227ff6",
+  "patch_sha256": "4253e59843b8b8562cb2ffdf0a41d17b165b0b7d21879ee5923cf973c6d45dbd",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_house_workflow.py",
+      "before_sha256": null,
+      "after_sha256": "06032c596810e6bfeaf917a628be0839593d996037a0153c36c4347720bd65f9"
+    },
+    {
+      "path": "tools/test_house_workflow.py",
+      "before_sha256": null,
+      "after_sha256": "d6b129a6d03bcbcefc00fb79c298c1e90df9fc0495f91dd0ce0b39b783e0b343"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_basement.py",
+      "before_sha256": "1b4eb30059ad2b2acca5cb27b1ccd55dced22595698eebd0245e2c4a59253c24",
+      "after_sha256": "d5a4d1c9f6b0f050d9e1a5e6b7ebcea87d154cf0a1fcf703b52237345efe7901"
+    },
+    {
+      "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
+      "before_sha256": "5a8bc706b25a0edc4ef31428bf0fef4f7a48bdd3ca93d61ff10fa90957743872",
+      "after_sha256": "4e7fa0a27b9a89ecbd63dba84d7d7f4ad86b824e275ed2077de597587749ff73"
+    },
+    {
+      "path": "tools/test_basement_adapter.py",
+      "before_sha256": "f8108d3b61937fcde3f916c3ce42e940b8b2337437e6dd2a125fbad46a19abfa",
+      "after_sha256": "e3f3ee60db0ec450b9d53d0298912bf2ee24ee1b3f8ef0b19c78fbac44667edd"
+    },
+    {
+      "path": "CONTROLS.txt",
+      "before_sha256": "0dd214696400b92ffa6f22a63e42970e3b60ba70c94383888b1c7c178846c949",
+      "after_sha256": "c4e18ef68186182a269b8bc6a77824a3c7ac2d721bb879ff1c37339f059a7a07"
+    },
+    {
+      "path": "docs/development/changes/unified-house-workflow.md",
+      "before_sha256": null,
+      "after_sha256": "b21b30334f141dbde19c911b5e9efcb1f65e00eebcaa64164df366a3c49ae6ab"
+    }
+  ]
+}

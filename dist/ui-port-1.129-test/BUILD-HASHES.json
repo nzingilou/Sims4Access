@@ -7,26 +7,29 @@
   "added_entries": [
     "tyjokr_a11y_build_coordinates.pyc",
     "tyjokr_a11y_build_helpers.pyc",
-    "tyjokr_a11y_basement.pyc"
+    "tyjokr_a11y_basement.pyc",
+    "tyjokr_a11y_house_workflow.pyc"
   ],
   "unchanged_entries": 60,
   "python": "3.7.9",
-  "script_sha256": "64d960df5b66e9e0e749c8b94cb30674607858b3c2e92e8a4e07c1a4ade27d3e",
+  "script_sha256": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
   "status": "candidate; native in-game validation pending",
   "files": {
-    "TS4_Access.ts4script": "64d960df5b66e9e0e749c8b94cb30674607858b3c2e92e8a4e07c1a4ade27d3e",
+    "TS4_Access.ts4script": "df800c571f6bebc6e85d94b4f5b68880e49022baf083f673de04788708618fbd",
     "TS4_Access_UI.package": "f5c0065abeb8fd3630d76fd9ef3c8784ac9cd5cd0779b06ff147305a1ebe877a",
     "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
   },
   "validation": {
     "passed": false,
     "input_stable": true,
-    "passing_suites": 121,
-    "suites": 122,
-    "reported_checks": 1642,
+    "passing_suites": 122,
+    "suites": 123,
+    "reported_checks": 1664,
     "compiled_basement_checks": 24,
+    "compiled_house_workflow_checks": 22,
+    "installed_plan_functions_verified": 6,
     "failure": "Unchanged PowerShell prelaunch helper timeout",
     "ui": "unchanged bytes; prior fidelity gates retained",
-    "in_game": "Basement candidate installed; live native basement creation and complete house door/stair confirmation pending."
+    "in_game": "Unified builder and fresh-floor verification installed; live basement and complete door/stair confirmation pending."
   }
 }

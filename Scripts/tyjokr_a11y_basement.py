@@ -12,6 +12,7 @@ _original_menu = None
 _original_reply = None
 _original_render = None
 _selection = None
+_failure = threading.local()
 SETTING = 'experimental_basement'
 TOOL = 'Basement Tool'
 
@@ -142,14 +143,17 @@ def _draw(want, overview):
             return 'nocatalog'
         points = [frame.world(wanted[0],wanted[1]), frame.world(wanted[2],wanted[3])]
         started = time.monotonic()
+        funds_before = _build.on_main(_build.funds)
         def action(screen):
             if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed before the basement drag')
+            if not _tool(TOOL,state): raise RuntimeError('The Basement Tool could not be confirmed after camera preparation')
             info = _helpers._native_floor(state)
             if info['floor'] != 0: raise RuntimeError('The game is no longer showing the ground floor')
             _log('drag', wanted=wanted, input_floor=0, expected_floor=-1, native_floor=info)
             _build.drag(screen[0],screen[1])
         performed = _build.point_and_act(points,0,action,'experimental basement {}'.format(wanted),overview=overview)
         if not performed: return 'noscreen'
+        _log('after-drag', native_floor=_helpers._native_floor(state), funds_before=funds_before, funds_after=_build.on_main(_build.funds))
         after = before
         for attempt in range(20):
             if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed while checking the basement')
@@ -178,18 +182,31 @@ def _draw(want, overview):
     return result
 
 
+def failure_reason():
+    return getattr(_failure,'reason','')
+
+
 def room_worker(want, overview=False, tries=4, level=0):
+    _failure.reason = ''
     if level != -1:
         return _original_room(want,overview=overview,tries=tries,level=level)
     if not _enabled():
         _core.post(_core.speak,'Experimental basement creation is off in accessibility settings.')
-        return 'disabled'
-    try:
-        return _draw(want,overview)
-    except Exception as exc:
-        _log('stopped', wanted=want, error=str(exc))
-        _core.post(_core.speak,'Basement construction stopped. '+str(exc))
-        return 'unverified'
+        result = 'disabled'
+    else:
+        try:
+            result = _draw(want,overview)
+        except Exception as exc:
+            _log('stopped', wanted=want, error=str(exc))
+            _core.post(_core.speak,'Basement construction stopped. '+str(exc))
+            result = 'unverified'
+    if result != tuple(want):
+        _failure.reason = {'disabled':'experimental basement creation is turned off',
+                          'occupied':'the requested footprint overlaps an existing basement room',
+                          'nofloor':'the game could not reach the ground floor for the basement tool',
+                          'nocatalog':'the required native tool selection was not confirmed',
+                          'noscreen':'the corners could not be framed clear of the interface'}.get(result,'the requested room on floor minus one could not be verified')
+    return result
 
 
 def _start_room(wanted):

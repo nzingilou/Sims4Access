@@ -8,7 +8,7 @@ class DrawTests(unittest.TestCase):
  def setUp(self):
   self.box=(2,3,6,8);self.state={'zone':9,'household':1};self.before={((12,12,14,14),0)};self.after=self.before|{(self.box,-1)}
   self.frame=types.SimpleNamespace(width=20,depth=20,world=lambda x,z:(100+x,200-z))
-  self.build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),frame=lambda:self.frame,set_floor=Mock(return_value=True),drag=Mock(),_last_error={'text':'old message','at':-1},_busy=[False])
+  self.build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),frame=lambda:self.frame,set_floor=Mock(return_value=True),drag=Mock(),_last_error={'text':'old message','at':-1},_busy=[False],funds=lambda:10000)
   def point(points,level,action,description,**kwargs):action([(10,20),(30,40)]);return True
   self.build.point_and_act=Mock(side_effect=point)
   b._build=self.build;b._core=types.SimpleNamespace(post=lambda fn,*a:fn(*a),speak=Mock(),log_exc=Mock())
@@ -21,7 +21,7 @@ class DrawTests(unittest.TestCase):
   args=self.build.point_and_act.call_args
   self.assertEqual(args[0][0],[(102,197),(106,192)]);self.assertEqual(args[0][1],0)
   self.assertTrue(args[1]['overview']);self.build.drag.assert_called_once_with((10,20),(30,40))
-  self.assertEqual([c[0][0] for c in b._tool.call_args_list],[b.TOOL,'Room Tool'])
+  self.assertEqual([c[0][0] for c in b._tool.call_args_list],[b.TOOL,b.TOOL,'Room Tool'])
  def test_original_room_worker_is_preserved_on_other_levels(self):
   with patch.object(b,'_original_room',return_value='ordinary') as original:
    for level in (0,1,2,-2):
@@ -61,7 +61,7 @@ class DrawTests(unittest.TestCase):
   b._rectangle.return_value=False
   self.assertEqual(b._draw(self.box,True),'unverified')
  def test_restore_failure_prevents_the_next_room(self):
-  b._tool.side_effect=[True,False]
+  b._tool.side_effect=[True,True,False]
   self.assertEqual(b._draw(self.box,True),'nocatalog')
  def test_context_change_prevents_drag_and_does_not_restore_into_dialog(self):
   b._same_context.return_value=False

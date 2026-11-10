@@ -474,6 +474,11 @@ def install():
         tyjokr_a11y_basement.install()
     except Exception as ex:
         _log("experimental basement adapter did not load: {!r}".format(ex))
+    try:
+        import tyjokr_a11y_house_workflow
+        tyjokr_a11y_house_workflow.install()
+    except Exception as ex:
+        _log("unified house workflow did not load: {!r}".format(ex))
     _log("narrow contribution layer installed")
 
 

@@ -1,8 +1,8 @@
 diff --git a/CONTROLS.txt b/CONTROLS.txt
-index 4f97283..dc59e21 100644
+index 4f97283..4568c14 100644
 --- a/CONTROLS.txt
 +++ b/CONTROLS.txt
-@@ -330,3 +330,14 @@ Backspace: Exit the grid.
+@@ -330,3 +330,24 @@ Backspace: Exit the grid.
  
  In Live mode the grid only reads the lot. It does not place objects.
  
@@ -17,12 +17,22 @@ index 4f97283..dc59e21 100644
 +its floor, complete rectangular footprint and unchanged existing rooms must
 +be verified before the helper continues to the next room, doors or stairs.
 +
++UNIFIED HOUSE BUILDER
++
++Alt+B, Build my house: start with an original ready-made layout, design a
++square or rectangle, or choose the original room list. All routes use one
++review screen. Choose Stories and basement to repeat aligned floor layouts.
++Choose Rooms, positions and custom names to edit one room at a time.
++Descriptions give the actual compass position and street-facing/rear role.
++Construction starts only after selecting Build this house in the review.
++The separate Configurable stacked house row is replaced by this flow.
++
 diff --git a/Scripts/tyjokr_a11y_basement.py b/Scripts/tyjokr_a11y_basement.py
 new file mode 100644
-index 0000000..15e9dc9
+index 0000000..4715055
 --- /dev/null
 +++ b/Scripts/tyjokr_a11y_basement.py
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,335 @@
 +"""Experimental native basement drawing, isolated from ordinary room workers."""
 +import configparser
 +import math
@@ -37,6 +47,7 @@ index 0000000..15e9dc9
 +_original_reply = None
 +_original_render = None
 +_selection = None
++_failure = threading.local()
 +SETTING = 'experimental_basement'
 +TOOL = 'Basement Tool'
 +
@@ -167,14 +178,17 @@ index 0000000..15e9dc9
 +            return 'nocatalog'
 +        points = [frame.world(wanted[0],wanted[1]), frame.world(wanted[2],wanted[3])]
 +        started = time.monotonic()
++        funds_before = _build.on_main(_build.funds)
 +        def action(screen):
 +            if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed before the basement drag')
++            if not _tool(TOOL,state): raise RuntimeError('The Basement Tool could not be confirmed after camera preparation')
 +            info = _helpers._native_floor(state)
 +            if info['floor'] != 0: raise RuntimeError('The game is no longer showing the ground floor')
 +            _log('drag', wanted=wanted, input_floor=0, expected_floor=-1, native_floor=info)
 +            _build.drag(screen[0],screen[1])
 +        performed = _build.point_and_act(points,0,action,'experimental basement {}'.format(wanted),overview=overview)
 +        if not performed: return 'noscreen'
++        _log('after-drag', native_floor=_helpers._native_floor(state), funds_before=funds_before, funds_after=_build.on_main(_build.funds))
 +        after = before
 +        for attempt in range(20):
 +            if not _build.on_main(_same_context,state): raise RuntimeError('Build context changed while checking the basement')
@@ -203,18 +217,31 @@ index 0000000..15e9dc9
 +    return result
 +
 +
++def failure_reason():
++    return getattr(_failure,'reason','')
++
++
 +def room_worker(want, overview=False, tries=4, level=0):
++    _failure.reason = ''
 +    if level != -1:
 +        return _original_room(want,overview=overview,tries=tries,level=level)
 +    if not _enabled():
 +        _core.post(_core.speak,'Experimental basement creation is off in accessibility settings.')
-+        return 'disabled'
-+    try:
-+        return _draw(want,overview)
-+    except Exception as exc:
-+        _log('stopped', wanted=want, error=str(exc))
-+        _core.post(_core.speak,'Basement construction stopped. '+str(exc))
-+        return 'unverified'
++        result = 'disabled'
++    else:
++        try:
++            result = _draw(want,overview)
++        except Exception as exc:
++            _log('stopped', wanted=want, error=str(exc))
++            _core.post(_core.speak,'Basement construction stopped. '+str(exc))
++            result = 'unverified'
++    if result != tuple(want):
++        _failure.reason = {'disabled':'experimental basement creation is turned off',
++                          'occupied':'the requested footprint overlaps an existing basement room',
++                          'nofloor':'the game could not reach the ground floor for the basement tool',
++                          'nocatalog':'the required native tool selection was not confirmed',
++                          'noscreen':'the corners could not be framed clear of the interface'}.get(result,'the requested room on floor minus one could not be verified')
++    return result
 +
 +
 +def _start_room(wanted):
@@ -918,11 +945,299 @@ index 0000000..c384013
 +        core.HOTKEYS[ord('B')] = (_build_menu, current[1])
 +    build._helper_integration_installed = True
 +    _log('installed')
+diff --git a/Scripts/tyjokr_a11y_house_workflow.py b/Scripts/tyjokr_a11y_house_workflow.py
+new file mode 100644
+index 0000000..3617689
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_house_workflow.py
+@@ -0,0 +1,282 @@
++"""Unified house planning and fresh Build-mode room geometry."""
++import copy
++import threading
++
++_build = None
++_core = None
++_house = None
++_planner = None
++_original_menu = None
++_original_scan = None
++_original_say = None
++_legacy_builder = None
++_main_ident = None
++ROLES = (('Bedroom','bedroom'),("Children's bedroom",'bedroom'),('Nursery','bedroom'),
++         ('Bathroom','bathroom'),('Kitchen','kitchen'),('Living room','living'),
++         ('Dining room','dining'),('Study','study'),('Storage','room'),('Hobby room','room'))
++
++
++def _log(kind, **data):
++    import json
++    import tyjokr_a11y_speech as speech
++    speech.log_line('house workflow: '+json.dumps(dict(kind=kind,**data),sort_keys=True,default=str))
++
++
++def _record_main():
++    global _main_ident
++    _main_ident = threading.get_ident()
++
++
++def _scan_main():
++    import services
++    lot = services.active_lot()
++    if lot is not None and _build.in_build_mode():
++        old = (getattr(lot,'_min_level',None),getattr(lot,'_max_level',None))
++        # Native Lot caches these properties until Zone.on_build_buy_exit.
++        # This only invalidates Python's two cached values, not the building.
++        lot.clear_cached_level_range()
++        fresh = (int(lot.min_level),int(lot.max_level))
++        if old != fresh: _log('room-floor-range', cached=old, fresh=fresh)
++    return _original_scan()
++
++
++def _scan_rooms():
++    if _main_ident is None: raise RuntimeError('The room-scan simulation thread is not ready')
++    if threading.get_ident() == _main_ident: return _scan_main()
++    result = _build.on_main(_scan_main)
++    if result is None: raise RuntimeError('The room-scan simulation thread did not answer')
++    return result
++
++
++def _context(plan):
++    import services
++    plan._a11y_zone = int(services.current_zone_id())
++    plan._a11y_household = int(services.active_household_id())
++    return plan
++
++
++def _valid(plan):
++    import services
++    return (_build.in_build_mode() and int(services.current_zone_id()) == plan._a11y_zone
++            and int(services.active_household_id()) == plan._a11y_household)
++
++
++def _floor(level):
++    return 'Basement' if level == -1 else 'Ground floor' if level == 0 else 'Floor {}'.format(level+1)
++
++
++def _position(plan, room):
++    level = room.get('level',0)
++    boxes = [r['box'] for r in plan.rooms if r.get('level',0)==level]
++    west,north,east,south = min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes)
++    a,b,c,d = room['box'];x,z=(a+c)/2.0,(b+d)/2.0
++    sides=[]
++    if z < (north+south)/2.0-.1: sides.append('north')
++    elif z > (north+south)/2.0+.1: sides.append('south')
++    if x < (west+east)/2.0-.1: sides.append('west')
++    elif x > (west+east)/2.0+.1: sides.append('east')
++    relation = 'connecting hallway' if room['kind']=='hall' else 'street-facing room' if room['uv'][1]==0 else 'rear room'
++    return '{}; {}; {}; {} by {} metres'.format(_floor(level),relation,' '.join(sides)+' side' if sides else 'center',c-a,d-b)
++
++
++def _door_names(plan):
++    for door in plan.doors:
++        level = door.get('level',0)
++        def owner(tile):
++            return next((r['name'] for r in plan.rooms if r.get('level',0)==level and r['box'][0]<=tile[0]<r['box'][2] and r['box'][1]<=tile[1]<r['box'][3]),None)
++        a,b=owner(door['tile_a']),owner(door['tile_b'])
++        if door['front'] and (a or b): door['what']='Front door into '+(a or b)
++        elif a and b: door['what']='Door between {} and {}'.format(a,b)
++
++
++def _extend(plan, stories, basement):
++    """Keep each existing floor template; repeat the highest template for additions."""
++    original = copy.deepcopy(plan)
++    templates={}
++    for room in original.rooms:
++        level=room.get('level',0)
++        templates.setdefault(level,[]).append(room)
++    if not templates or 0 not in templates: raise ValueError('The plan has no ground-floor template')
++    low,high=_planner._limits()
++    if isinstance(stories,bool) or not isinstance(stories,int) or not 1<=stories<=high+1:
++        raise ValueError('That story count is outside the native game limits')
++    if basement and low>=0: raise ValueError('The game does not allow a basement here')
++    levels=list(range(-1 if basement else 0,stories));p=copy.deepcopy(original);p.rooms=[];p.doors=[]
++    for level in levels:
++        source=level if level in templates else 0 if level<0 else max(v for v in templates if v>=0)
++        for room in templates[source]:
++            r=copy.deepcopy(room);r['level']=level
++            if source!=level:
++                base=room.get('_a11y_template_name',room['name'])
++                r['name']=_floor(level)+' '+base;r['_a11y_template_name']=base
++            p.rooms.append(r)
++        for door in original.doors:
++            if door.get('level',0)!=source or (door['front'] and level!=0): continue
++            d=copy.deepcopy(door);d['level']=level;p.doors.append(d)
++    p.floors=stories;p.stairs=None
++    halls=[r for r in p.rooms if r['level']==0 and r['kind']=='hall']
++    if len(levels)>1:
++        if len(halls)!=1 or p.width<5: raise ValueError('This layout has no verified straight-stair hallway')
++        hall=halls[0];top=(p.width-2,hall['uv'][1]);p.stairs={'top':top,'climb':(1,0)}
++    frame=_build.frame();along=frame.width if p.side in ('north','south') else frame.depth
++    _house._map_plan(p,frame,along)
++    p._a11y_transitions=[]
++    if p.stairs:
++        for lower in levels[:-1]:p._a11y_transitions.append((p.stairs['top_lot'],p.stairs['climb_lot'],lower,lower+1))
++    _door_names(p)
++    return p
++
++
++def _summary(plan):
++    levels=sorted({r.get('level',0) for r in plan.rooms})
++    counts=', '.join('{}: {} rooms'.format(_floor(level),sum(r['kind']!='hall' and r.get('level',0)==level for r in plan.rooms)) for level in levels)
++    return '{} by {} metres. Street-facing side: {}. {}. {} connecting stair runs.'.format(plan.width,plan.depth,plan.side,counts,len(getattr(plan,'_a11y_transitions',())))
++
++
++def _edit_rooms(plan):
++    rows=[(r['name'],_position(plan,r),i) for i,r in enumerate(plan.rooms)]+[('Back to house plan',None,None)]
++    def selected(index):
++        if index is None: _review(plan);return
++        room=plan.rooms[index]
++        options=[('Keep '+room['name'],_position(plan,room),None)]
++        if room['kind']!='hall':options += [(name,None,(name,kind)) for name,kind in ROLES]
++        options += [('Give this room a custom name','Changes the label; keeps its geometry and current room type.','custom')]
++        def changed(value):
++            if value=='custom':
++                def named(text):
++                    text=' '.join((text or '').split())[:60]
++                    if text:room['name']=text;room['_a11y_template_name']=text
++                    _door_names(plan);_edit_rooms(plan)
++                _core.ask_text('Name this room',_position(plan,room)+'. Type one room name. Leave blank to keep '+room['name']+'.','',named)
++                return
++            if value is not None:room['name'],room['kind']=value;room['_a11y_template_name']=room['name']
++            _door_names(plan);_edit_rooms(plan)
++        _core.choose('Room use and name',room['name']+'. '+_position(plan,room),options,changed,tag='build')
++    _core.choose('Rooms and positions','Select any room to choose its use or give it a custom name. Each room is edited separately.',rows,selected,tag='build')
++
++
++def _stories(plan):
++    low,high=_planner._limits()
++    def count_chosen(count):
++        options=[('No basement',None,False)]
++        if low<0:options.append(('One basement level','Experimental native basement drawing, checked before continuing.',True))
++        def below(value):
++            try:p=_extend(plan,count,value)
++            except ValueError as exc:_core.speak(str(exc));return
++            _review(p)
++        _core.choose('Basement','Keep the same perimeter below ground.',options,below,tag='build')
++    rows=[('{} above-ground {}'.format(n,'story' if n==1 else 'stories'),None,n) for n in range(1,high+2)]
++    _core.choose('Stories','Existing floor layouts are preserved. Extra stories repeat the highest floor layout; names can be changed separately.',rows,count_chosen,tag='build')
++
++
++def _review(plan):
++    if getattr(plan,'problem',None): _core.speak(plan.problem);return
++    if not _valid(plan):_core.speak('The lot or household changed. Open Build my house again.');return
++    estimate=_house.wall_meters(plan)*_house.WALL_PRICE+len(plan.doors)*100+len(getattr(plan,'_a11y_transitions',()))*_house.STAIR_PRICE
++    funds=_build.funds() or 0
++    rows=[('Build this house' if estimate<=funds else 'Estimated cost exceeds household funds',
++           'Uses the existing native construction and placement checks.', 'build' if estimate<=funds else None),
++          ('Rooms, positions and custom names','Choose each room separately; no comma-separated list.','rooms'),
++          ('Stories and basement','Repeat layouts without changing the perimeter.','stories'),('Cancel',None,None)]
++    def selected(action):
++        if action=='rooms':_edit_rooms(plan)
++        elif action=='stories':_stories(plan)
++        elif action=='build':
++            if not _valid(plan):_core.speak('The lot or household changed. Nothing was built.');return
++            if _build._busy[0]:_core.speak('Still working on the last build step.');return
++            _door_names(plan);plan._a11y_roof_prompt=True
++            _log('approved',summary=_summary(plan),rooms=[(r.get('level',0),r['kind'],r['name'],r['box']) for r in plan.rooms],stairs=getattr(plan,'_a11y_transitions',()))
++            _house.start_build(plan)
++    _core.choose('Build my house: review',_summary(plan)+' Estimated structural cost {:,}; household funds {:,}.'.format(estimate,funds),rows,selected,tag='build')
++
++
++def _preset(value):
++    try:
++        plan=_house.make_two_floor_plan(value[1]) if value[0]=='two' else _house.make_plan(list(value[1]))
++        if getattr(plan,'problem',None):_core.speak(plan.problem);return
++        # Also creates an explicit stair scope for the existing two-floor presets.
++        plan=_extend(plan,plan.floors,False)
++        _review(_context(plan))
++    except Exception as exc:
++        _log('plan-failed',error=str(exc));_core.speak('The house plan could not be prepared. '+str(exc))
++
++
++def _custom():
++    sizes=[('Compact square','10 by 10 metres.',(10,10)),('Standard rectangle','10 by 11 metres.',(10,11)),('Large rectangle','12 by 14 metres.',(12,14))]
++    def size_chosen(size):
++        def layout_chosen(layout):
++            defaults=['Living room','Kitchen','Bedroom','Bathroom'] if layout=='four' else ['Living room','Bedroom']
++            plan=_planner._build_plan(size[0],size[1],[0],layout,{0:defaults})
++            if getattr(plan,'problem',None):_core.speak(plan.problem);return
++            _stories(_context(plan))
++        rows=[('Front and back rooms','One street-facing room, a hallway and one rear room per floor.','two'),
++              ('Four rooms around a hallway','Two street-facing rooms and two rear rooms per floor.','four')]
++        _core.choose('Room layout','The footprint stays aligned between floors. Review every room by its actual compass position afterward.',rows,layout_chosen,tag='build')
++    _core.choose('House footprint','Choose the rectangular perimeter.',sizes,size_chosen,tag='build')
++
++
++def _ready_made():
++    rows=[(label,None,('one',list(kinds))) for label,kinds in _house.PRESETS]
++    rows += [(label,None,('two',variant)) for label,variant in _house.TWO_FLOOR_PRESETS]
++    _core.choose('Ready-made house layouts','Preserves the original room dimensions and door geometry. Stories, basement and room names can be adjusted in the review.',rows,_preset,tag='build')
++
++
++def _legacy_plan(kinds):
++    _preset(kinds if isinstance(kinds,tuple) else ('one',kinds))
++
++
++def open_builder():
++    if not _build.in_build_mode():_core.speak('Enter Build mode first.');return
++    rows=[('Start with a ready-made layout','Original one- and two-story presets, with a common review and customization flow.',_ready_made),
++          ('Design a square or rectangular house','Choose footprint, front/back or four-room layout, stories and basement.',_custom),
++          ('Choose the room list yourself','Original one-floor room-list planner, using the same review.',lambda:_house._custom([]))]
++    _core.choose('Build my house','One house builder: choose a starting layout, then review room positions, names, stories and basement before building.',rows,lambda fn:fn(),tag='build')
++
++
++def _open_menu():
++    choose=_core.choose
++    def extended(title,prompt,rows,callback,tag=None,*args,**kwargs):
++        if title=='Build helper':
++            output=[];added=False
++            for row in rows:
++                if row[0] in ('Build my house','Configurable stacked house'):
++                    if not added:output.append(('Build my house','Ready-made or custom layouts, stories, basement and individual room names.',open_builder));added=True
++                else:output.append(row)
++            if not added:output.append(('Build my house','Ready-made or custom layouts, stories, basement and individual room names.',open_builder))
++            rows=output
++        return choose(title,prompt,rows,callback,tag,*args,**kwargs)
++    _core.choose=extended
++    try:return _original_menu()
++    finally:_core.choose=choose
++
++
++def _say(text):
++    import tyjokr_a11y_basement as basement
++    reason=basement.failure_reason()
++    if reason and text.startswith('I stopped building at the '):
++        return _original_say('Basement construction stopped: '+reason+'. No further rooms were attempted. Inspect the result before using Undo or trying again.')
++    return _original_say(text)
++
++
++def install():
++    global _build,_core,_house,_planner,_original_menu,_original_scan,_legacy_builder,_original_say
++    import tyjokr_a11y_plus_build as build
++    import tyjokr_a11y_plus_core as core
++    import tyjokr_a11y_plus_house as house
++    import tyjokr_a11y_plus_rooms as rooms
++    try:
++        import tyjokr_a11y_house_planner as planner
++    except ImportError:
++        return
++    if getattr(build,'_house_workflow_installed',False):return
++    _build,_core,_house,_planner=build,core,house,planner
++    _original_scan=rooms.scan_rooms;rooms.scan_rooms=_scan_rooms
++    core.post(_record_main)
++    # The pump may discard old queued work during loading. Its ticker also
++    # records the owner, and follows any later simulation-thread change.
++    core.add_ticker(.1,_record_main)
++    _original_menu=build.open_menu;build.open_menu=_open_menu
++    _original_say=house._say;house._say=_say
++    _legacy_builder=house.build_my_house;house.build_my_house=open_builder;house._show_plan=_legacy_plan
++    build._house_workflow_installed=True
++    _log('installed')
 diff --git a/contrib-reference/modules/tyjokr_a11y_contrib.py b/contrib-reference/modules/tyjokr_a11y_contrib.py
-index be41ec4..2452254 100644
+index be41ec4..a58b61e 100644
 --- a/contrib-reference/modules/tyjokr_a11y_contrib.py
 +++ b/contrib-reference/modules/tyjokr_a11y_contrib.py
-@@ -459,6 +459,21 @@ def install():
+@@ -459,6 +459,26 @@ def install():
          import tyjokr_a11y_detached
      except Exception as ex:
          _log("detached structure planner did not load: {!r}".format(ex))
@@ -941,6 +1256,11 @@ index be41ec4..2452254 100644
 +        tyjokr_a11y_basement.install()
 +    except Exception as ex:
 +        _log("experimental basement adapter did not load: {!r}".format(ex))
++    try:
++        import tyjokr_a11y_house_workflow
++        tyjokr_a11y_house_workflow.install()
++    except Exception as ex:
++        _log("unified house workflow did not load: {!r}".format(ex))
      _log("narrow contribution layer installed")
  
  
@@ -1054,6 +1374,19 @@ index 0000000..fb93945
 +Changed code: Scripts/tyjokr_a11y_build_helpers.py (native query transport, set_floor, house/stair wrappers, install); flash/extra-classes/ControlPanel.as (one read-only message listener and A11yNativeFloorQuery, next to RefreshFloorData).
 +
 +Only the helper bytecode and GameTray UI resource change. UI Cheats compatibility is unchanged. Live confirmation of complete door/stair placement is pending.
+diff --git a/docs/development/changes/unified-house-workflow.md b/docs/development/changes/unified-house-workflow.md
+new file mode 100644
+index 0000000..51ce8b6
+--- /dev/null
++++ b/docs/development/changes/unified-house-workflow.md
+@@ -0,0 +1,7 @@
++# Unified house workflow and basement verification
++
++- Add one Build my house entry covering original presets, square/rectangular front/back or four-room layouts, and the original room-list planner. Common review supports aligned stories, optional basement, individual room types/names and actual compass positions. Preserve native room/door geometry and the construction workers.
++- Refresh the native Lot floor-range cache before Build-mode room scans; marshal worker scans through the simulation pump. This prevents cached floor-zero bounds from hiding a new basement or story.
++- Reconfirm Basement Tool after camera preparation; log native floor bounds and funds after drawing. Replace the misleading generic wrong-size message for a failed basement step.
++
++Code: Scripts/tyjokr_a11y_house_workflow.py; targeted updates in Scripts/tyjokr_a11y_basement.py; final bootstrap hook in contrib-reference/modules/tyjokr_a11y_contrib.py. Controls in CONTROLS.txt. Focused tests in tools/test_house_workflow.py and tools/test_basement_adapter.py.
 diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
 index 2bc9cbf..644b81d 100644
 --- a/flash/TooltipManager_patched.as
@@ -1284,7 +1617,7 @@ index 2ba5d47..b8640e5 100644
           var _loc2_:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
 diff --git a/tools/test_basement_adapter.py b/tools/test_basement_adapter.py
 new file mode 100644
-index 0000000..2ee7a9e
+index 0000000..4e31cad
 --- /dev/null
 +++ b/tools/test_basement_adapter.py
 @@ -0,0 +1,137 @@
@@ -1298,7 +1631,7 @@ index 0000000..2ee7a9e
 + def setUp(self):
 +  self.box=(2,3,6,8);self.state={'zone':9,'household':1};self.before={((12,12,14,14),0)};self.after=self.before|{(self.box,-1)}
 +  self.frame=types.SimpleNamespace(width=20,depth=20,world=lambda x,z:(100+x,200-z))
-+  self.build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),frame=lambda:self.frame,set_floor=Mock(return_value=True),drag=Mock(),_last_error={'text':'old message','at':-1},_busy=[False])
++  self.build=types.SimpleNamespace(on_main=lambda fn,*a:fn(*a),frame=lambda:self.frame,set_floor=Mock(return_value=True),drag=Mock(),_last_error={'text':'old message','at':-1},_busy=[False],funds=lambda:10000)
 +  def point(points,level,action,description,**kwargs):action([(10,20),(30,40)]);return True
 +  self.build.point_and_act=Mock(side_effect=point)
 +  b._build=self.build;b._core=types.SimpleNamespace(post=lambda fn,*a:fn(*a),speak=Mock(),log_exc=Mock())
@@ -1311,7 +1644,7 @@ index 0000000..2ee7a9e
 +  args=self.build.point_and_act.call_args
 +  self.assertEqual(args[0][0],[(102,197),(106,192)]);self.assertEqual(args[0][1],0)
 +  self.assertTrue(args[1]['overview']);self.build.drag.assert_called_once_with((10,20),(30,40))
-+  self.assertEqual([c[0][0] for c in b._tool.call_args_list],[b.TOOL,'Room Tool'])
++  self.assertEqual([c[0][0] for c in b._tool.call_args_list],[b.TOOL,b.TOOL,'Room Tool'])
 + def test_original_room_worker_is_preserved_on_other_levels(self):
 +  with patch.object(b,'_original_room',return_value='ordinary') as original:
 +   for level in (0,1,2,-2):
@@ -1351,7 +1684,7 @@ index 0000000..2ee7a9e
 +  b._rectangle.return_value=False
 +  self.assertEqual(b._draw(self.box,True),'unverified')
 + def test_restore_failure_prevents_the_next_room(self):
-+  b._tool.side_effect=[True,False]
++  b._tool.side_effect=[True,True,False]
 +  self.assertEqual(b._draw(self.box,True),'nocatalog')
 + def test_context_change_prevents_drag_and_does_not_restore_into_dialog(self):
 +  b._same_context.return_value=False
@@ -1845,6 +2178,152 @@ index c4f2bb7..a693550 100644
      A11yCalendarHeader: () => false,
      A11yCalendarLabel: () => '',
      A11yCompleted: () => false,
+diff --git a/tools/test_house_workflow.py b/tools/test_house_workflow.py
+new file mode 100644
+index 0000000..7717e66
+--- /dev/null
++++ b/tools/test_house_workflow.py
+@@ -0,0 +1,140 @@
++"""Unified planning, native geometry preservation, and cached-floor regression."""
++import ast,copy,pathlib,sys,threading,types,unittest
++from unittest.mock import Mock,patch
++import test_scanner_v5 as env
++import tyjokr_a11y_plus_build as native_build
++import tyjokr_a11y_plus_house as native_house
++sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'Scripts'))
++import tyjokr_a11y_house_workflow as w
++ROOT=pathlib.Path(__file__).resolve().parents[1]
++# Execute the existing plan generator without its import-time integration hooks.
++tree=ast.parse((ROOT/'contrib-reference/modules/tyjokr_a11y_house_planner.py').read_text())
++subset=ast.Module(body=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in ('_room','_build_plan')])
++namespace={};exec(compile(subset,'existing_house_planner','exec'),namespace)
++
++class PlanningTests(unittest.TestCase):
++ def setUp(self):
++  self.menus=[];self.text=[]
++  frame=types.SimpleNamespace(width=40,depth=40)
++  self.frame=frame
++  core=types.SimpleNamespace(choose=lambda *a,**k:self.menus.append((a,k)),speak=Mock(),ask_text=lambda *a:self.text.append(a))
++  planner=types.SimpleNamespace(_limits=lambda:(-4,3),_build_plan=namespace['_build_plan'])
++  self.patches=[patch.object(native_build,'frame',return_value=frame),patch.object(native_house,'street_side',return_value='north'),patch.object(w,'_build',native_build),patch.object(w,'_house',native_house),patch.object(w,'_planner',planner),patch.object(w,'_core',core),patch.object(w,'_valid',return_value=True),patch.object(w,'_context',side_effect=lambda p:p),patch.object(w,'_log'),patch.object(native_build,'funds',return_value=100000),patch.object(native_build,'in_build_mode',return_value=True)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def plan(self):return native_house.make_two_floor_plan('2bed')
++ def select(self,value):self.menus[-1][0][3](value)
++ def test_original_two_floor_presets_keep_geometry_in_all_compass_orientations(self):
++  for side in ('north','east','south','west'):
++   native_house.street_side.return_value=side
++   for variant in ('2bed','3bed','4bed'):
++    original=native_house.make_two_floor_plan(variant);new=w._extend(original,2,False)
++    self.assertEqual([(r['box'],r['uv'],r['level'],r['kind']) for r in new.rooms],[(r['box'],r['uv'],r['level'],r['kind']) for r in original.rooms])
++    self.assertEqual([(d['tile_a'],d['tile_b'],d['level'],d['front']) for d in new.doors],[(d['tile_a'],d['tile_b'],d['level'],d['front']) for d in original.doors])
++    self.assertEqual(new.stairs,original.stairs);self.assertEqual(len(new._a11y_transitions),1)
++ def test_one_floor_preset_has_no_stairs_or_implicit_extra_floor(self):
++  original=native_house.make_plan(list(native_house.PRESETS[0][1]));new=w._extend(original,1,False)
++  self.assertEqual([r['box'] for r in new.rooms],[r['box'] for r in original.rooms]);self.assertIsNone(new.stairs);self.assertEqual(new._a11y_transitions,[])
++ def test_extra_floors_repeat_top_layout_and_basement_uses_ground(self):
++  original=self.plan();new=w._extend(original,4,True)
++  for level in (-1,0,1,2,3):
++   source=0 if level<=0 else 1
++   self.assertEqual([r['box'] for r in new.rooms if r['level']==level],[r['box'] for r in original.rooms if r['level']==source])
++  self.assertEqual([a[2:] for a in new._a11y_transitions],[(-1,0),(0,1),(1,2),(2,3)])
++  self.assertEqual(sum(d['front'] for d in new.doors),1)
++ def test_changing_story_count_preserves_existing_basement_custom_names(self):
++  plan=w._extend(self.plan(),2,True);plan.rooms[0]['name']='Hobby basement';plan.rooms[0]['kind']='room'
++  changed=w._extend(plan,3,True)
++  self.assertEqual(changed.rooms[0]['name'],'Hobby basement');self.assertEqual(changed.rooms[0]['kind'],'room')
++ def test_repeated_extensions_do_not_accumulate_floor_prefixes(self):
++  plan=w._extend(self.plan(),3,False);new=w._extend(plan,4,False)
++  self.assertTrue(all('Floor 3' not in r['name'] for r in new.rooms if r['level']==3))
++ def test_removing_stories_removes_their_doors_and_stairs(self):
++  plan=w._extend(self.plan(),3,True);new=w._extend(plan,1,False)
++  self.assertTrue(all(r['level']==0 for r in new.rooms));self.assertTrue(all(d['level']==0 for d in new.doors));self.assertIsNone(new.stairs)
++ def test_unverified_story_counts_and_missing_stair_hallway_are_refused(self):
++  for count in (0,5,True,1.5):
++   with self.assertRaises(ValueError):w._extend(self.plan(),count,False)
++  plan=self.plan();plan.rooms=[r for r in plan.rooms if r['kind']!='hall']
++  with self.assertRaises(ValueError):w._extend(plan,2,False)
++ def test_both_custom_layouts_produce_the_expected_rooms_on_every_floor(self):
++  for layout,count in [('two',2),('four',4)]:
++   base=namespace['_build_plan'](10,10,[0],layout,{0:['Room {}'.format(i) for i in range(count)]})
++   plan=w._extend(base,3,True)
++   for level in (-1,0,1,2):
++    self.assertEqual(sum(r['level']==level and r['kind']!='hall' for r in plan.rooms),count)
++   self.assertEqual(len(plan._a11y_transitions),3)
++ def test_renaming_a_room_updates_connected_door_labels_without_moving_them(self):
++  plan=self.plan();geometry=copy.deepcopy([(d['tile_a'],d['tile_b']) for d in plan.doors]);plan.rooms[0]['name']='Family lounge';w._door_names(plan)
++  self.assertTrue(any('Family lounge' in d['what'] for d in plan.doors));self.assertEqual([(d['tile_a'],d['tile_b']) for d in plan.doors],geometry)
++ def test_actual_compass_description_rotates_with_the_existing_plan_mapping(self):
++  native_house.street_side.return_value='west';plan=self.plan();text=w._position(plan,plan.rooms[0])
++  self.assertIn('street-facing',text);self.assertIn('south west side',text)
++ def test_unified_menu_contains_one_builder_and_preserves_other_actions(self):
++  original_rows=[('Configurable stacked house','stack','stack'),('Other','other','other'),('Build my house','preset','preset')]
++  core=w._core;original=core.choose
++  with patch.object(w,'_original_menu',side_effect=lambda:core.choose('Build helper','prompt',original_rows,lambda f:f(),tag='build')):
++   w._open_menu();w._open_menu()
++  self.assertIs(core.choose,original);self.assertEqual(len(original_rows),3)
++  for args,kwargs in self.menus:
++   self.assertEqual([r[0] for r in args[2]],['Build my house','Other'])
++ def test_room_editor_asks_for_one_room_instead_of_comma_separated_names(self):
++  plan=self.plan();w._edit_rooms(plan);self.select(0);self.select('custom')
++  self.assertEqual(len(self.text),1);self.text[0][3]('  Family   lounge  ')
++  self.assertEqual(plan.rooms[0]['name'],'Family lounge');self.assertIn('Rooms and positions',self.menus[-1][0][0])
++ def test_role_selection_keeps_room_geometry(self):
++  plan=self.plan();box=plan.rooms[0]['box'];w._edit_rooms(plan);self.select(0);self.select(("Children's bedroom",'bedroom'))
++  self.assertEqual(plan.rooms[0]['name'],"Children's bedroom");self.assertEqual(plan.rooms[0]['box'],box)
++ def test_review_does_not_build_until_explicit_confirmation_and_rechecks_context(self):
++  plan=w._extend(self.plan(),2,False)
++  with patch.object(native_house,'start_build') as start:
++   w._review(plan);start.assert_not_called();w._valid.return_value=False;self.select('build');start.assert_not_called()
++ def test_review_uses_the_existing_construction_entry_and_plan_stair_scope(self):
++  plan=w._extend(self.plan(),2,True)
++  with patch.object(native_house,'start_build') as start:
++   w._review(plan);self.select('build');start.assert_called_once_with(plan)
++   self.assertTrue(plan._a11y_roof_prompt);self.assertEqual(len(plan._a11y_transitions),2)
++ def test_ready_made_list_keeps_all_original_presets(self):
++  w._ready_made();rows=self.menus[-1][0][2]
++  self.assertEqual(len(rows),len(native_house.PRESETS)+len(native_house.TWO_FLOOR_PRESETS))
++
++class ScanTests(unittest.TestCase):
++ def setUp(self):
++  self.active=False;self.events=[]
++  class Lot:
++   _min_level=0;_max_level=0
++   @property
++   def min_level(s):
++    if s._min_level is None:s._min_level=-1
++    return s._min_level
++   @property
++   def max_level(s):
++    if s._max_level is None:s._max_level=2
++    return s._max_level
++   def clear_cached_level_range(s):s._min_level=s._max_level=None
++  self.lot=Lot();self.native=lambda:[self.lot.min_level,self.lot.max_level]
++  self.patches=[patch.dict(sys.modules,services=types.SimpleNamespace(active_lot=lambda:self.lot)),patch.object(w,'_build',types.SimpleNamespace(in_build_mode=lambda:self.active,on_main=lambda fn:fn())),patch.object(w,'_original_scan',side_effect=self.native),patch.object(w,'_main_ident',threading.get_ident()),patch.object(w,'_log')]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++ def test_empty_lot_cached_zero_range_cannot_hide_new_basement_or_upper_story(self):
++  self.assertEqual(self.native(),[0,0]);self.active=True;self.assertEqual(w._scan_rooms(),[-1,2])
++ def test_live_mode_keeps_the_original_cache_behavior(self):self.assertEqual(w._scan_rooms(),[0,0])
++ def test_worker_scan_is_marshalled_without_calling_game_apis_on_worker(self):
++  self.active=True
++  with patch.object(w,'_main_ident',-1):
++   w._build.on_main=Mock(return_value=['pumped']);self.assertEqual(w._scan_rooms(),['pumped'])
++   w._original_scan.assert_not_called();self.assertEqual(self.lot._min_level,0)
++ def test_timeout_never_returns_an_empty_geometry_as_success(self):
++  with patch.object(w,'_main_ident',-1):
++   w._build.on_main=lambda fn:None
++   with self.assertRaises(RuntimeError):w._scan_rooms()
++ def test_uninitialised_thread_guard_never_runs_native_scan(self):
++  with patch.object(w,'_main_ident',None):
++   with self.assertRaises(RuntimeError):w._scan_rooms()
++  w._original_scan.assert_not_called()
++ def test_basement_failure_message_does_not_claim_wrong_room_size(self):
++  basement=types.SimpleNamespace(failure_reason=lambda:'the basement room was not verified')
++  with patch.dict(sys.modules,tyjokr_a11y_basement=basement),patch.object(w,'_original_say') as say:
++   w._say('I stopped building at the storage room, because it came out a different size.')
++   self.assertIn('basement room was not verified',say.call_args[0][0]);self.assertNotIn('different size',say.call_args[0][0])
++   w._say('Building the living room.');say.assert_called_with('Building the living room.')
++
++if __name__=='__main__':unittest.main()
 diff --git a/tools/test_native_floor_bridge.js b/tools/test_native_floor_bridge.js
 new file mode 100644
 index 0000000..44baff2

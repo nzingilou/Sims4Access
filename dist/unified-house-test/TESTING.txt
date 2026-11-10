@@ -1,0 +1,9 @@
+SCRIPT-ONLY TEST UPDATE
+
+Keep the already installed native-floor UI packages. With the game closed, replace TS4_Access.ts4script in Mods/TS4_Access.
+
+Alt+B > Build my house now offers original presets, square/rectangle design and the original room-list planner. All use one review screen. Stories and basement extends aligned floor templates. Rooms, positions and custom names edits rooms individually, without a comma-separated list. Construction begins only through Build this house.
+
+Use a backed-up test save. First try an original two-story preset without a basement and check doors/stairs. Then try a custom two-story house with a basement. The previous verifier may have missed a room that was actually built: inspect existing basement rooms or use another clear test area before redrawing the same footprint.
+
+The basement assistant remains available for standalone rooms and read-only floor/room inspection. New diagnostics include refreshed Python floor ranges, native post-drag floor bounds, funds and the exact approved plan.
