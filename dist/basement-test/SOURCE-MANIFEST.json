@@ -1,0 +1,31 @@
+{
+  "git_base": "0fe03a8",
+  "patch_sha256": "5283781d6306fb8c4a6b28cde5166278148b4401e5751439bce2b7b4773432b6",
+  "files": [
+    {
+      "path": "Scripts/tyjokr_a11y_basement.py",
+      "before_sha256": null,
+      "after_sha256": "1b4eb30059ad2b2acca5cb27b1ccd55dced22595698eebd0245e2c4a59253c24"
+    },
+    {
+      "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
+      "before_sha256": "e4f1949187f678e22a12768430a8e04385a62aa791904bbd0dfdad3f7ad17a84",
+      "after_sha256": "5a8bc706b25a0edc4ef31428bf0fef4f7a48bdd3ca93d61ff10fa90957743872"
+    },
+    {
+      "path": "tools/test_basement_adapter.py",
+      "before_sha256": null,
+      "after_sha256": "f8108d3b61937fcde3f916c3ce42e940b8b2337437e6dd2a125fbad46a19abfa"
+    },
+    {
+      "path": "CONTROLS.txt",
+      "before_sha256": "6a7b491644d8e97acef34838863ecd530dc2ea152c719e288126de633050bbec",
+      "after_sha256": "0dd214696400b92ffa6f22a63e42970e3b60ba70c94383888b1c7c178846c949"
+    },
+    {
+      "path": "docs/development/changes/basement-adapter.md",
+      "before_sha256": null,
+      "after_sha256": "8a7ddb9efcce442ed3a5fab24d3c4482e965a6ecb7c55cea492b9f37e8c959b6"
+    }
+  ]
+}

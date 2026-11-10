@@ -1,0 +1,11 @@
+SCRIPT-ONLY TEST UPDATE
+
+Copy TS4_Access.ts4script into Mods/TS4_Access with the game closed. Keep the matching native-floor UI packages already installed.
+
+On a backed-up test save, test:
+1. Alt+B > Basement assistant (experimental) > Build a rectangular basement room. For example, 4 by 5 metres at a clear chosen position. Confirm construction.
+2. Configurable stacked house, one above-ground story plus One basement level, two rooms per floor. Check basement rooms, doors and connecting stairs.
+3. Repeat a four-room or two-story stacked layout on another clear test area/save.
+4. Turn experimental basement creation off in accessibility settings: basement requests should stop without drawing; ordinary above-ground helpers should still work.
+
+Alt+B > Basement assistant > Inspect basement floors and rooms records read-only geometry and native floor bounds. Tool names, input floor, requested rectangle, new/removed room geometry, native placement errors and tool restoration are logged during construction.

@@ -1,7 +1,17 @@
 {
   "git_base": "127ec613e8a430ee841cca54d617901f1409ea56",
-  "patch_sha256": "d1770df1413a4809a0863966f7f629be98ba38b794bde71ff45a3e68f7accf66",
+  "patch_sha256": "472d20020570769d12d4ed52ffd1c6f6f1993e5caa8b30ad3830a327d40a7e3b",
   "files": [
+    {
+      "path": "CONTROLS.txt",
+      "before_sha256": "6a7b491644d8e97acef34838863ecd530dc2ea152c719e288126de633050bbec",
+      "after_sha256": "0dd214696400b92ffa6f22a63e42970e3b60ba70c94383888b1c7c178846c949"
+    },
+    {
+      "path": "Scripts/tyjokr_a11y_basement.py",
+      "before_sha256": null,
+      "after_sha256": "1b4eb30059ad2b2acca5cb27b1ccd55dced22595698eebd0245e2c4a59253c24"
+    },
     {
       "path": "Scripts/tyjokr_a11y_build_coordinates.py",
       "before_sha256": null,
@@ -15,12 +25,17 @@
     {
       "path": "contrib-reference/modules/tyjokr_a11y_contrib.py",
       "before_sha256": "d5d85359e0e5a87e139db4093b179471b053ab8349d93a25b56181dbbd4c327e",
-      "after_sha256": "e4f1949187f678e22a12768430a8e04385a62aa791904bbd0dfdad3f7ad17a84"
+      "after_sha256": "5a8bc706b25a0edc4ef31428bf0fef4f7a48bdd3ca93d61ff10fa90957743872"
     },
     {
       "path": "docs/development/audits/requested-ui-2026-11-09.md",
       "before_sha256": null,
       "after_sha256": "746848597ed2eaa6396cf8d29ebf9a277d7c8146010c315595ddff33ce2b316b"
+    },
+    {
+      "path": "docs/development/changes/basement-adapter.md",
+      "before_sha256": null,
+      "after_sha256": "8a7ddb9efcce442ed3a5fab24d3c4482e965a6ecb7c55cea492b9f37e8c959b6"
     },
     {
       "path": "docs/development/changes/build-helper-integration.md",
@@ -51,6 +66,11 @@
       "path": "flash/extra-classes/ControlPanel.as",
       "before_sha256": "6db1f1208b3e2201e330700427e0e0f49c4d3f08eddfea4a6f720acfa5922ce3",
       "after_sha256": "63a0aacf862c2de4aa30784a232be7d9e0700d00607f18ff50473500813a2186"
+    },
+    {
+      "path": "tools/test_basement_adapter.py",
+      "before_sha256": null,
+      "after_sha256": "f8108d3b61937fcde3f916c3ce42e940b8b2337437e6dd2a125fbad46a19abfa"
     },
     {
       "path": "tools/test_build_coordinates.py",

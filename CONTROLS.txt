@@ -330,3 +330,14 @@ Backspace: Exit the grid.
 
 In Live mode the grid only reads the lot. It does not place objects.
 
+EXPERIMENTAL BASEMENTS
+
+Alt+B, Basement assistant (experimental): build a rectangular basement room
+or inspect native floor bounds and existing basement rooms without building.
+Choose the size and position, then confirm before any construction.
+Stacked-house plans with a basement use this adapter automatically.
+Accessibility settings: experimental basement creation turns it on or off.
+Each basement room is drawn from ground level with the native Basement Tool;
+its floor, complete rectangular footprint and unchanged existing rooms must
+be verified before the helper continues to the next room, doors or stairs.
+

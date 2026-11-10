@@ -1,0 +1,30 @@
+{
+  "base_commit": "0fe03a8",
+  "base_script_sha256": "df3e61758afbaac124db60212f5845938048fb9aacb987d89371cb70fc368c25",
+  "script_sha256": "64d960df5b66e9e0e749c8b94cb30674607858b3c2e92e8a4e07c1a4ade27d3e",
+  "changed_entries": [
+    "tyjokr_a11y_contrib.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_basement.pyc"
+  ],
+  "unchanged_entries": 62,
+  "python": "3.7.9",
+  "ui_packages_changed": false,
+  "in_game_validation": "pending",
+  "required_ui": {
+    "TS4_Access_UI.package": "f5c0065abeb8fd3630d76fd9ef3c8784ac9cd5cd0779b06ff147305a1ebe877a",
+    "TS4_Access_Compatibility_UICheats.package": "f75d677edd4f811ccdd36b8792ab89f09e21fae664e6ccbaacbc3eabdf9aa708"
+  },
+  "validation": {
+    "passed": false,
+    "input_stable": true,
+    "passing_suites": 121,
+    "suites": 122,
+    "reported_checks": 1642,
+    "compiled_basement_checks": 24,
+    "failure": "Unchanged PowerShell prelaunch helper timeout",
+    "ui": "unchanged bytes; prior fidelity gates retained",
+    "in_game": "pending"
+  }
+}

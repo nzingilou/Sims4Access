@@ -469,6 +469,11 @@ def install():
         tyjokr_a11y_build_helpers.install()
     except Exception as ex:
         _log("build helper integration did not load: {!r}".format(ex))
+    try:
+        import tyjokr_a11y_basement
+        tyjokr_a11y_basement.install()
+    except Exception as ex:
+        _log("experimental basement adapter did not load: {!r}".format(ex))
     _log("narrow contribution layer installed")
 
 
