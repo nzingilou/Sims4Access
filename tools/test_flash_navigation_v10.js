@@ -61,6 +61,7 @@ function method(source, name) {
   const types = /:\s*(?:DisplayObjectContainer|DisplayObject|TextField|MovieClip|MouseEvent|KeyboardEvent|Event|Boolean|Number|String|Object|Array|Rectangle|Sprite|Point|int|Error)\b/g;
   const parameters = match[1].replace(types, '');
   const body = source.slice(start, cursor - 1).replace(types, '')
+    .replace(/Object\(card\)\[fields\[index\]\]\s+as\s+DisplayObject/g,'asCast(Object(card)[fields[index]],DisplayObject)')
     .replace(/((?:Object\([\w.]+\)|[\w.]+)(?:\[[\w."]+\])*)\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)/g, 'asCast($1,$2)')
     .replace(/\s+as\s+Rectangle\b/g, '')
     .replace(/\bis\s+(TextField|MovieClip|DisplayObjectContainer)\b/g, 'instanceof $1');
@@ -94,7 +95,7 @@ function manager() {
     'A11yCalendarAddOwner', 'A11ySemanticTarget', 'A11yTextDecoration', 'A11yHiddenHireControl',
     'A11yKeyboardDecoration', 'A11yInformational', 'A11yCompositeRow', 'A11yActionProxy',
     'A11yCollectFocusables', 'A11yCollectText', 'A11yMapLabel', 'A11yWizardNavLabel', 'A11yChoiceDescription', 'A11yAnnounceDisplay',
-    'A11yOptionsRowLabel']) {
+    'A11yOptionsRowLabel', 'A11yPlexInfo', 'A11yPlexActivate', 'A11yScenarioText']) {
     value[name] = method(tooltip, name);
   }
   return value;

@@ -137,8 +137,8 @@ def _hint_parts(frame):
     return [result]
 
 
-def _fit_parts(frame, with_facing=True):
-    parts = list(_original_fit_parts(frame, with_facing=with_facing))
+def _fit_parts(frame, with_facing=True, objects=None):
+    parts = list(_original_fit_parts(frame, with_facing=with_facing, objects=objects))
     if _enabled():
         try:
             parts.extend(_hint_parts(frame))

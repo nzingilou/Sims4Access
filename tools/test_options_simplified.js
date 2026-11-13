@@ -198,6 +198,7 @@ function optionUi() {
   ui.A11yOptionsControl = optionControl.bind(ui);
   ui.A11ySingleFilterLabel = () => null;
   ui.A11yPickerToggleCell = () => false;
+  ui.A11yPlexInfo = () => null;
   ui.A11yCheckboxState = optionState.bind(ui);
   ui.A11yActionProxy = actionProxy.bind(ui);
   ui.A11yCollectText = (value, lines) => {

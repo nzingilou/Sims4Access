@@ -49,7 +49,7 @@ function cart(increaseAllowed){
  f.button.stage=f.stage;
  Object.assign(f.ui,{mA11yScope:{stage:f.stage},mA11yKeyboard:true,mA11yIdxDir:0,mA11yPendingScope:null,
   mA11yNavQueue:[],mA11ySimplifiedMenus:false,A11yModalFrame(){},A11yIsModalScope:()=>true,
-  A11yCalendarStep:()=>false,A11ySeasonActivate:()=>false,A11yActivateCASName:()=>false,
+  A11yCalendarStep:()=>false,A11ySeasonActivate:()=>false,A11yPlexActivate:()=>false,A11yActivateCASName:()=>false,
   A11yActionProxy:x=>x,A11yInformational:()=>false,A11yInventoryMenu:()=>false,A11yPickerToggleCell:()=>false,
   A11yGridStep(){throw Error('Quantity row must not move focus');},
   A11ySafeDispatch(target,type){assert.equal(target,f.button);if(type==='click'){assert(f.button.enabled);buys++;}}});

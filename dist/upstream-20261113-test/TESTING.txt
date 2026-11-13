@@ -1,0 +1,9 @@
+UPDATED UPSTREAM PLUS LOCAL FIXES
+
+Script and main UI: Mods/TS4_Access. Optional matching UI Cheats compatibility: Mods/_Overrides. Replace the old files with the game closed; clear localthumbcache.package.
+
+New native controls: Ctrl+Alt+comma/period changes scanner range; Ctrl+Alt+U/D changes target layer; Ctrl+Alt+J labels a room; Ctrl+Alt+I searches the catalog.
+
+Test apartment map markers and property-panel region expansion/unit controls; scenario card speech and its separate Play button from the main menu. Native eligibility and later confirmations remain in control. Then check a two-story house helper and explicit TV/stand placement on a backed-up save.
+
+Chair hints are retained; a dedicated chair-snapping fix is not included. Live scenario, unit selection and construction confirmation remain pending.

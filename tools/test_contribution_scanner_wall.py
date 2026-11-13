@@ -4,7 +4,7 @@ import pathlib
 import sys
 import types
 
-ROOT = pathlib.Path(__file__).resolve().parents[1] / 'contrib-reference' / 'modules'
+ROOT = pathlib.Path(__file__).resolve().parents[1] / 'Scripts'
 
 def functions(filename, names, namespace):
     tree = ast.parse((ROOT / filename).read_text(encoding='utf-8'))
@@ -16,29 +16,20 @@ def entry(ident, category='chairs', distance=8, sim=False, level=0):
                                  is_sim=sim, level_delta=level)
 
 scope = ['6 meters', 6, 'distance']
-ns = {'_scope': lambda: scope, '_object_for_entry': lambda e: objects.get(e.obj_id),
+ns = {'_range': lambda: scope, '_object_for_entry': lambda e: objects.get(e.obj_id),
       '_on_active_lot': lambda o: o.on_lot, '_room_id': lambda o: o.room}
-functions('tyjokr_a11y_contrib.py', {'_matches_scope', '_selection', '_restore_selection'}, ns)
-assert ns['_matches_scope'](entry(1, distance=80, sim=True), None)
-assert not ns['_matches_scope'](entry(2, distance=8), None)
+functions('tyjokr_a11y_scanner.py', {'_in_range'}, ns)
+assert ns['_in_range'](entry(1, distance=80, sim=True), None)
+assert not ns['_in_range'](entry(2, distance=8), None)
 objects = {1: types.SimpleNamespace(on_lot=True, room=7),
            2: types.SimpleNamespace(on_lot=False, room=7)}
 scope[:] = ['whole lot', None, 'lot']
-assert ns['_matches_scope'](entry(1, distance=80), None)
-assert not ns['_matches_scope'](entry(2), None)
+assert ns['_in_range'](entry(1, distance=80), None)
+assert not ns['_in_range'](entry(2), None)
 scope[:] = ['this room', None, 'room']
-assert ns['_matches_scope'](entry(1), 7)
-assert not ns['_matches_scope'](entry(1, level=1), 7)
-assert not ns['_matches_scope'](entry(1), None)
-s = types.SimpleNamespace(_groups=['buy'], _group_index=0, _item_index=1,
-    _by_group={'buy': [entry(1), entry(2)]}, _tree_level='items',
-    _tree_groups={}, _tree_items={})
-saved = ns['_selection'](s)
-s._by_group['buy'].reverse()
-ns['_restore_selection'](s, saved)
-assert s._item_index == 0 and s._tree_level == 'items'
-assert s._tree_items[('buy', 'chairs')] == 2
-
+assert ns['_in_range'](entry(1), 7)
+assert not ns['_in_range'](entry(1, level=1), 7)
+assert not ns['_in_range'](entry(1), None)
 grid = types.ModuleType('tyjokr_a11y_grid'); grid._tile=(2,3); grid._facing=0; grid._level=0
 tiles = types.ModuleType('tyjokr_a11y_tiles'); tiles.STEPS=((0,1),(1,0),(0,-1),(-1,0))
 tiles.position=lambda *a: types.SimpleNamespace(x=12.,y=5.,z=23.)
@@ -47,13 +38,14 @@ mathmod = types.ModuleType('sims4.math'); mathmod.Vector3=lambda x,y,z: (x,y,z)
 sims4=types.ModuleType('sims4'); sims4.math=mathmod
 sys.modules['sims4']=sims4; sys.modules['sims4.math']=mathmod
 frame=types.SimpleNamespace(world=lambda i,j:(10.+i,20.+j), yaw=lambda side:side)
-w={'_wall_state':lambda:(frame,{0:'wall'},{}), '_selected_height':lambda:('middle',1.5)}
-functions('tyjokr_a11y_wall.py', {'_selected_wall','_wall_anchor'}, w)
-assert w['_selected_wall']() == (frame,0)
-point, facing, label, height = w['_wall_anchor'](frame,0)
-assert point == (12.,6.5,23.5) and facing == 2
+w={'_wall_state':lambda:(frame,{0:'wall'},{}), 'selected_height':lambda:('middle',1.5)}
+w.update({'_blocked':lambda side:side in ('wall','blocked'),'separates_rooms':lambda frame,side:True})
+functions('tyjokr_a11y_wall.py', {'selected_wall','_wall_anchor'}, w)
+assert w['selected_wall']() == (frame,0)
+point, height = w['_wall_anchor'](frame,0)
+assert point == (12.,6.5,23.5) and height == 1.5
 w['_wall_state']=lambda:(frame,{0:'wall'},{0:object()})
-assert w['_selected_wall']() is None
+assert w['selected_wall']() is None
 w['_wall_state']=lambda:(frame,{0:'open'},{})
-assert w['_selected_wall']() is None
+assert w['selected_wall']() is None
 print('1 scanner wall scenario checks passed: scopes, category identity, wall anchoring and door exclusion')

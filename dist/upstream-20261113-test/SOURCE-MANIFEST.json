@@ -1,0 +1,382 @@
+{
+  "base": "adb868c",
+  "patch_sha256": "ec0830bfd3293783f01a0c11ae0b2ec8155b3d8d5c3aa3ac39097f284da5dfdb",
+  "files": {
+    "CONTROLS.txt": {
+      "before": "78c5307b66d540ceccf9172201394123a445d7e39fe4dce952a7687de6d59080",
+      "after": "90d4f3ef9b5b76236ffd1e174c94b89a4bbe4c085ac049a03a69fadc813d3afd"
+    },
+    "Scripts/tyjokr_a11y_away.py": {
+      "before": null,
+      "after": "584146b894a05191b7442989172e44cdea0dc90370c6f29627080b0142f7092c"
+    },
+    "Scripts/tyjokr_a11y_basement.py": {
+      "before": null,
+      "after": "d5a4d1c9f6b0f050d9e1a5e6b7ebcea87d154cf0a1fcf703b52237345efe7901"
+    },
+    "Scripts/tyjokr_a11y_build_coordinates.py": {
+      "before": null,
+      "after": "91a34d5d32ca1e7c68b4c749c1f855cce3cb9b8b32e747a1c4d199bb7dac19f1"
+    },
+    "Scripts/tyjokr_a11y_build_helpers.py": {
+      "before": null,
+      "after": "c852206e9d0bbd3f4a7493762de67f5c25a61ebe33eafaa4b689326cf1c3362c"
+    },
+    "Scripts/tyjokr_a11y_cleanliness.py": {
+      "before": null,
+      "after": "35f3e0f239108b2049afd58709fc846e8e5cfc57066a26adc8446a666e888bab"
+    },
+    "Scripts/tyjokr_a11y_display_diagnostic.py": {
+      "before": null,
+      "after": "027bcaf78baaf226b785a622a876be3fbdf19b3fb3b33ae50da09a112b646cc3"
+    },
+    "Scripts/tyjokr_a11y_event_goals.py": {
+      "before": null,
+      "after": "8f8ae339765056d1c49040a7116010954959cc79e03e87bbd75a55ff5cef3ac2"
+    },
+    "Scripts/tyjokr_a11y_extensions.py": {
+      "before": null,
+      "after": "a91966f5f140cd1e5c5472c99750372532ca1b473b5214eb08b2d7f35f6d349d"
+    },
+    "Scripts/tyjokr_a11y_grid.py": {
+      "before": "9afd717170273eceaf576f99ef0518d216db4fe3740e241163c5d07d2fbacc56",
+      "after": "964863c5ca2c8c77da1f86dad2c3c6804f30a0843e0b56a9b655f69a010562c6"
+    },
+    "Scripts/tyjokr_a11y_ground.py": {
+      "before": null,
+      "after": "f97261c7ddcc02181d6fe1ae55b8c2f79f4ab18cca6aa8fcbbb4bdfbaf2f0994"
+    },
+    "Scripts/tyjokr_a11y_house_workflow.py": {
+      "before": null,
+      "after": "06032c596810e6bfeaf917a628be0839593d996037a0153c36c4347720bd65f9"
+    },
+    "Scripts/tyjokr_a11y_hub.py": {
+      "before": "dbc870cb4ba4db56a2c0d7671905809b83dfc573205dfc305410eb0436dd409a",
+      "after": "f7cd9e384fc2dc8114482e44ed28218d3c294a8d31f8b1e2050bd522a96388f4"
+    },
+    "Scripts/tyjokr_a11y_lang.py": {
+      "before": "0bfed85a4bca34440ef21d5308ca21aef7915d44fb0a1fd922cf277e3ee5ac92",
+      "after": "0f46ab54697b992ecd964efb3298753a5e9ee274d4c9c379492d468ae15854a3"
+    },
+    "Scripts/tyjokr_a11y_layers.py": {
+      "before": "46bb395c85e28d4f97806cd84db9eeece46ea0658f8b1e27fdb8063dc503cb8c",
+      "after": "36357acb1e41c0b9c4b7d611cc816e1a38b43a75ec52ed251c669e8e19e69da2"
+    },
+    "Scripts/tyjokr_a11y_menu.py": {
+      "before": "bd6e898ca601a86a045b65db3703cc0bd8e4c6406d47a729fcee749e8246a3fc",
+      "after": "7283023bd84ac4b78e6f48a0e16292ce91dd1924e3ce6bd148bba9eccd56238c"
+    },
+    "Scripts/tyjokr_a11y_place.py": {
+      "before": "ba5b6980619276736fa4082c0911b9dcd4c47bf42ff7295dc0e3d64078695f7a",
+      "after": "ed8057d62c2336077675bf181031a1d5fcc7114323c356f20a2468e8db497245"
+    },
+    "Scripts/tyjokr_a11y_room_bridge.py": {
+      "before": null,
+      "after": "d710151c99a5496b22796c89e7e305b1d4452046dea82ed63de525975cb1f6ae"
+    },
+    "Scripts/tyjokr_a11y_rooms.py": {
+      "before": "2ecd74ef2b5fb71cbc20d6e541a3ba9381b4c74b0880a3f4863ef26dcb3b587a",
+      "after": "745dd05ed83e8f7bc2cfd409a27a2b16a081bcb8e86d7ec8f7f60720b52e9903"
+    },
+    "Scripts/tyjokr_a11y_scanner.py": {
+      "before": "f507a31b0dc249ade4c909a44e26d98de7cbfbea0b01a4286de52bda9a98522a",
+      "after": "219f263c1c61421dc57dfc4bc53cbe714e3d0010e5495a84839c3f0b4e306a08"
+    },
+    "Scripts/tyjokr_a11y_settings.py": {
+      "before": "8d217812eecf63c8e29462d8312807f03c280f10c2e378b9680d05178fb11515",
+      "after": "c672ac907b56d29e577843104c6051dcb000cd28b3caf045eabd5600aaf4ea34"
+    },
+    "contrib-reference/docs/AUDIT-2026-11-01.md": {
+      "before": null,
+      "after": "1c3d1e3f36102b3ec5356cf7641acc54df7be847bfd0154604dc5334295401f6"
+    },
+    "contrib-reference/docs/CHANGELOG.md": {
+      "before": null,
+      "after": "cd60c47e9224837b3ff4242b00b2f9f635f2495ea159f22fb1ffe9a05ab6d2f4"
+    },
+    "contrib-reference/docs/CONTROLS-AND-TESTING.md": {
+      "before": null,
+      "after": "44a01276c0ba7193a2383d45e81e896bdf01c9892d07042427051bcdb57b3053"
+    },
+    "contrib-reference/docs/DEVELOPER-MANIFEST.md": {
+      "before": null,
+      "after": "a2b4b027d2c95ff148c90992570dd7adec320f18a0339e2617dfaf9a9670d56f"
+    },
+    "contrib-reference/modules/tyjokr_a11y_chair_alignment.py": {
+      "before": null,
+      "after": "3a3f8925693b2cbde1cb9980dc4f427b4b8922949d5be4e74a1649e13eef4986"
+    },
+    "contrib-reference/modules/tyjokr_a11y_detached.py": {
+      "before": null,
+      "after": "d0d854c3ab5e4b184b71e30cb32920a20e27f9e4d598336134e2ebd29719fe6a"
+    },
+    "contrib-reference/modules/tyjokr_a11y_house_planner.py": {
+      "before": null,
+      "after": "1fbc134acb35747a9d546cd1fa571e125203f727eb5366bb7d472a549da7f146"
+    },
+    "contrib-reference/modules/tyjokr_a11y_lot_grid.py": {
+      "before": null,
+      "after": "a1f8d510e5ec86d27810b67cb9601ac14a8c4ee2af6297558607302d0414079e"
+    },
+    "contrib-reference/modules/tyjokr_a11y_roof_tools.py": {
+      "before": null,
+      "after": "3b9f3c1ca0d207a9d9880acaae8e203ee7dc6f20933f841978250f67343a2a49"
+    },
+    "docs/development/UI-PORT-1.129.md": {
+      "before": null,
+      "after": "68ac18ea116ad047744d1cde4cec462ce9a99ee5daf29badd1e80ad4031bb459"
+    },
+    "docs/development/audits/chair-snapping-20261113.md": {
+      "before": null,
+      "after": "8d7e93baa2a5a8d4e46df4969611cd2f25e7b502689b910476ee002093ce0207"
+    },
+    "docs/development/audits/requested-ui-2026-11-09.md": {
+      "before": null,
+      "after": "967afd26821a07bf95464a0362a8026ff0c6678538f55d2c3cb58325621e600b"
+    },
+    "docs/development/changes/away-actions.md": {
+      "before": null,
+      "after": "00c718b2fa05cba95636ad1d34c0fca9e0c4f5653a8d2f01995a47f472e55434"
+    },
+    "docs/development/changes/basement-adapter.md": {
+      "before": null,
+      "after": "8a7ddb9efcce442ed3a5fab24d3c4482e965a6ecb7c55cea492b9f37e8c959b6"
+    },
+    "docs/development/changes/build-helper-integration.md": {
+      "before": null,
+      "after": "45e8528650f9979a5a60e5365d5d68d055e5455a6b63c079cd89895b31bec55b"
+    },
+    "docs/development/changes/cleaning-diagnostic.md": {
+      "before": null,
+      "after": "21934829ac25cdfa8e6f547ea64039740fec72ec8c8f39315b4e66e2e14200a2"
+    },
+    "docs/development/changes/display-diagnostic.md": {
+      "before": null,
+      "after": "0565edb8de9ccf1d8ce0ccbc2614d842cc3a0421a46e141841b85c2ecca54bb5"
+    },
+    "docs/development/changes/floor-actions.md": {
+      "before": null,
+      "after": "14256daae7d3a842cb1a0e6f62b1d7e8357924e1b9617cef1cf2a17c959d09d2"
+    },
+    "docs/development/changes/graphics-option-labels.md": {
+      "before": null,
+      "after": "ccf2406402093552ecdd10fb2a12a1507265681f66afc5e9bd7fd9140f152eba"
+    },
+    "docs/development/changes/info-panel-navigation.md": {
+      "before": null,
+      "after": "daf9a6b9db40f922092828a2d301c2d0cf76ef979dab84b28c6626ef4eea0d57"
+    },
+    "docs/development/changes/measured-build-coordinates.md": {
+      "before": null,
+      "after": "58cf985993ccb529e4d038e0a5146cf70fe4f67d44090268f7b8d89805e98830"
+    },
+    "docs/development/changes/mood-reader-audit.md": {
+      "before": null,
+      "after": "b8d4143df3a6ca62ee39d561c97855eb6df10234de158855da929a59a6045ba0"
+    },
+    "docs/development/changes/native-floor-and-stair-isolation.md": {
+      "before": null,
+      "after": "c3addfd94f3832712a784c7bffd653732cdf77e3cd01f2d32453faeaecfe677e"
+    },
+    "docs/development/changes/options-settings.md": {
+      "before": null,
+      "after": "9d6f52e1aa6c1c5e9b1a2ac145958dc306b05a3f060db491c1200025d9f378da"
+    },
+    "docs/development/changes/scanner-cleanliness.md": {
+      "before": null,
+      "after": "1eab532df97ee50e37ac2e283e4e42fd61f35860b8dc9fc838830992575da314"
+    },
+    "docs/development/changes/ui-port-1.129.md": {
+      "before": null,
+      "after": "04393ad1cd8aaeafbc1bfe5cbf52097140f18fcba09d7541f8f164b86432c5ea"
+    },
+    "docs/development/changes/unified-house-workflow.md": {
+      "before": null,
+      "after": "b21b30334f141dbde19c911b5e9efcb1f65e00eebcaa64164df366a3c49ae6ab"
+    },
+    "docs/development/changes/upstream-20261113.md": {
+      "before": null,
+      "after": "b6b4f66cd86a444156c18456f4a4aecf6805bfdf023a024e864aa6d3639af823"
+    },
+    "flash/TooltipManager_patched.as": {
+      "before": "855f4d798bbd7bfbd905cc3b0f941ecec8ab0ac4bdb27beda8293f33d188ab73",
+      "after": "21fd00a1e9acab65787768030554be2b841f254c37874d233cdd62a605a25d03"
+    },
+    "flash/build_uicheats_compat.ps1": {
+      "before": "3bc5044c18d5f62f3f950400533befd1d0fb4396bc61754104c773d7bb177dad",
+      "after": "e30f145dab89a8ccb54dee1da5a8c3513758459c29eab8dbc1723d8c3596846e"
+    },
+    "flash/extra-classes/CommodityContainer.as": {
+      "before": "b6cfdec494a1647aa787690c71cc7a98537d44f1babe8344bd1f3709fc85a0d5",
+      "after": "b6d6c6a217a723eb9b48777a0cb482e46f383f15c36fd1ae18ac7287b625a6d7"
+    },
+    "flash/extra-classes/ControlPanel.as": {
+      "before": "6db1f1208b3e2201e330700427e0e0f49c4d3f08eddfea4a6f720acfa5922ce3",
+      "after": "63a0aacf862c2de4aa30784a232be7d9e0700d00607f18ff50473500813a2186"
+    },
+    "flash/extra-classes/DialogMain.as": {
+      "before": "8ea93402b40cc98d4ffcc5dd7d8e6331d167db0eefd0ec887baa2073e244bb2d",
+      "after": "7ebac08ca4ca5391a37a3f5a405b797635727ec34362708e215045411924497c"
+    },
+    "flash/extra-classes/PlexLotSelectOverlay.as": {
+      "before": null,
+      "after": "30ed1522105eae6d39f8fa7cfa8f49ba71697318e10c0466748190ec69e14fb1"
+    },
+    "flash/gate_compat_pcode.py": {
+      "before": "f0d2d071de06bd25d0c054327b8f9ddd6444192d1c18819f8f3f3a79250e7c72",
+      "after": "2a7eee677a24053034baab8885c568ffba3a96906720eea896354fbc1b9c7585"
+    },
+    "flash/prepare_uicheats_purchase.py": {
+      "before": null,
+      "after": "e7c99047b9d8b717875fa0ee75ba038b29249ccebc8277471e8aedaf185a8085"
+    },
+    "flash/rebuild_all.ps1": {
+      "before": "9dda03e44a1fe86444819de42c5fa11b5a71f3932639fa6a5f2f9ef84552655c",
+      "after": "689c3b02863511864da709132398f20635dfc7378aca10751224cbb86772e2cf"
+    },
+    "tools/package_contribution_test.py": {
+      "before": null,
+      "after": "593f51a335521d381a928ceff267f77ae172846958f726a5f35516a687c2fc82"
+    },
+    "tools/test_apartments_scenarios.js": {
+      "before": null,
+      "after": "7315a4d98b90158ec679da18a31e2eeaaa0c19cc3d2e61d07ed09876deab6e4c"
+    },
+    "tools/test_away_actions.py": {
+      "before": null,
+      "after": "d57e6ed53662b25f8efbd0f4a0e9b76937cfa8050fecef7655995912e75b059f"
+    },
+    "tools/test_basement_adapter.py": {
+      "before": null,
+      "after": "e3f3ee60db0ec450b9d53d0298912bf2ee24ee1b3f8ef0b19c78fbac44667edd"
+    },
+    "tools/test_build_coordinates.py": {
+      "before": null,
+      "after": "51619f9aea904b136275853e51a75abf79f607b8af1a6568b3e91df3f6856392"
+    },
+    "tools/test_build_helpers.py": {
+      "before": null,
+      "after": "caad5ef4da1e6e7a9e14f4590375a834d267ab5c3ffec51292f25e0c6ca2ccac"
+    },
+    "tools/test_cleaning_diagnostic.py": {
+      "before": null,
+      "after": "ef9071686f4586d6a66986db8f11a8aeefdb1b8ce9e68f25c965fadc09a75dca"
+    },
+    "tools/test_cleanliness.py": {
+      "before": null,
+      "after": "2cf691fa3b1f171acd80ee4fc6f5bb2329ef966783ba0f9777af976fd84737b0"
+    },
+    "tools/test_contribution.py": {
+      "before": "f09500f8a05d39cd14993dfee33de73c39b7227717e8c75e17e081883edc761e",
+      "after": "238806306b07e63c527cd944b73fd14070562c8d5dceaec149747f0e0b3c86d1"
+    },
+    "tools/test_contribution_display.py": {
+      "before": null,
+      "after": "25f00553f985b06adbd47fc03a763e68b1967bf8b8c9ffd4f7b532155afbffff"
+    },
+    "tools/test_contribution_focused_surface.py": {
+      "before": null,
+      "after": "d6248cccda8a4047650343c1ed76fdfcd35b483bf356b134a4584cc6936135da"
+    },
+    "tools/test_contribution_room_framing.py": {
+      "before": null,
+      "after": "77c5796a18379ea46adb89ea32127dd0bfda72c06a6892f290df8d4e3f77f6ec"
+    },
+    "tools/test_contribution_scanner_wall.py": {
+      "before": null,
+      "after": "f2f3c9d41849f376f7ca24e581214526c73f9be0f19c80717c6d5eb36e58df90"
+    },
+    "tools/test_coordinate_probe.js": {
+      "before": null,
+      "after": "861fa7aead20e17a42f08ba9441291ff8419fa689ffc5b7f9ebc4a40d87f056d"
+    },
+    "tools/test_display_diagnostic.py": {
+      "before": null,
+      "after": "ade5c59d330086c99b32812ee13549fd13203eafb9b854f19ed36369e19f66f7"
+    },
+    "tools/test_event_activation_v13.js": {
+      "before": "fe797b167a1991bb35cfd7ed21263bb589cde5e9719d4992a0d5a8b054c0742f",
+      "after": "f751431bdf67c7df59859383b80eece119d429ef2ba31d715e45f544046c2019"
+    },
+    "tools/test_event_goals.py": {
+      "before": null,
+      "after": "c6e29420b202bfd3d8917166c10605ea8b0fad4f67c416ab0fc2188554238d44"
+    },
+    "tools/test_flash_navigation_v10.js": {
+      "before": "9f922926efc77d7746d803b5ad6bf91beba757974a05927bc7ed2aed26e60181",
+      "after": "91e23703123a8f86653d718e12851e7db568068109831a7a7357a42e39d7a7d3"
+    },
+    "tools/test_ground_actions.py": {
+      "before": null,
+      "after": "683054583769e74b71ce0b88c6bf3efecf1048e7fbd77be3230c7fbe7a810aa1"
+    },
+    "tools/test_house_workflow.py": {
+      "before": null,
+      "after": "d6b129a6d03bcbcefc00fb79c298c1e90df9fc0495f91dd0ce0b39b783e0b343"
+    },
+    "tools/test_native_floor_bridge.js": {
+      "before": null,
+      "after": "8024ab1f41a9022aa852a796430ca61b78b648172f20c9baa48d49af3f62753d"
+    },
+    "tools/test_nested_lists.js": {
+      "before": "3b5499c98e71fad19b6aa785f02e62e2e9ce6c30dafb281a52ce2d36e08cfdb8",
+      "after": "6941fc1111839895a50669dd00215ea55d7a88d1882aabde8647010357eb6097"
+    },
+    "tools/test_occult_motive_text.js": {
+      "before": null,
+      "after": "1833b231bea3b600c19bfbcb3a58a6bffe5cdf62735b0a627b31706c4dba70cf"
+    },
+    "tools/test_options_simplified.js": {
+      "before": "565e6cfa7c362fcce9fdcb43e0dbf31e7bbdab15ebc3d18baaf7494bdae902b9",
+      "after": "015e20e791d10ebe94933e9db895890be30eb4610ee750be3a6d6cf88c30c724"
+    },
+    "tools/test_purchase_footer.js": {
+      "before": null,
+      "after": "e606033b843a400e1d550f0d574ce9aa4c881fa7c7b5fd0032143ccc217b4aa4"
+    },
+    "tools/test_recipe_picker.js": {
+      "before": "b365c7b5904e25c62a87efc418a214f326f1c115c66712ea72c2cd05199be582",
+      "after": "0e4b37679daf7e3190ebc8893525aabe0de2768eeb0de3ec2e1ed4260ce0ad1e"
+    },
+    "tools/test_requested_ui_access.js": {
+      "before": null,
+      "after": "7a1e4222cfea5af08c6c1c11c49cc7d5624c597489b7c9c602acdaf1f01be41d"
+    },
+    "tools/test_scanner_pick_bridge.js": {
+      "before": null,
+      "after": "55c9f7a60dfa974ad5d0d78759c4b28e0476a70fd6ff2a08e90ed0b919d15b3c"
+    },
+    "tools/test_uicheats_purchase.js": {
+      "before": null,
+      "after": "e6ee33c07ec20ba83898f093cb4663a60ad2e1be2a08d8a1cf6573297425eafa"
+    },
+    "tools/test_upstream_integration.py": {
+      "before": null,
+      "after": "db36c839d82483422cd984b7abcf0f5b9a4cfb63dc53e0eb974a48ce478d4e2a"
+    },
+    "tools/ui_bridge_inventory.py": {
+      "before": null,
+      "after": "149d980f7481c75c80431b6507cb7b884200fe69ceae097af6820d0efb1c4944"
+    },
+    "tools/ui_port_compat_inputs.py": {
+      "before": null,
+      "after": "96e403a98954591006bc11ffcae097736468629c1ab672aa15943322501f4526"
+    },
+    "tools/ui_port_handler_audit.py": {
+      "before": null,
+      "after": "cf9dd40c14a36d3784f1ae2beff0ca3cf70dbf1ee6db5dd5b939b9cf5e9f8701"
+    },
+    "tools/ui_port_inventory.py": {
+      "before": null,
+      "after": "34be7d2e5a5b460f148ccecf0813415361128604b93a23235c987c19abe4bb98"
+    },
+    "tools/ui_port_sources.py": {
+      "before": null,
+      "after": "12478a5072031fb05bf938be47b90ac83dddf9a24d9c4482166c0c74d856c95f"
+    },
+    "tools/ui_port_verify.py": {
+      "before": null,
+      "after": "5b041cd804a985bbb4015a01193703953416fe50d51a9838e304e7a3ac6c07d6"
+    }
+  }
+}

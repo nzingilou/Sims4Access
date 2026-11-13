@@ -1,44 +1,60 @@
-"""Verify explicit surface placement never falls back to floor or another object."""
-import ast
-import pathlib
-import sys
-import types
+"""Integrated surface targeting keeps native slot validation and payment."""
+import unittest
+from unittest.mock import patch
+import test_placement as env
+import tyjokr_a11y_layers as layers
 
-root = pathlib.Path(__file__).resolve().parents[1]
-tree = ast.parse((root / 'contrib-reference/modules/tyjokr_a11y_layers.py').read_text(encoding='utf-8'))
-nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('_surface_slots', '_finish_on_surface')]
-slot = types.SimpleNamespace(empty=True, is_deco_slot=lambda:False, is_valid_for_placement=lambda **kw:True)
-target = types.SimpleNamespace(id=9, level=0, position=None, get_runtime_slots_gen=lambda:[slot],
-    is_in_inventory=lambda:False, is_hidden=lambda:False, get_household_owner_id=lambda:1)
-services = types.ModuleType('services')
-services.object_manager=lambda:types.SimpleNamespace(get=lambda ident:target)
-services.active_lot=lambda:types.SimpleNamespace(is_position_on_lot=lambda p:True)
-place = types.ModuleType('tyjokr_a11y_place')
-place._pending={'serial':3}; place._zone_id=lambda:7; place._household_id=lambda:1
-destroyed=[]; speech=[]
-place._destroy=destroyed.append; place._say_text=lambda *a:speech.append(a[0])
-baseline_slot=lambda *a:None; place._free_slot=baseline_slot
-sys.modules.update({'services':services,'tyjokr_a11y_place':place})
-finished=[]
-def finish(obj,item,price,need,position,level,surface,angle,key,exact):
-    assert need=='slot'
-    assert place._free_slot(obj,position,level)==(target,slot)
-    finished.append(obj)
-    return True
-ns={'_surface_request':None,'_original_finish':finish,'_focused_target':lambda:target,'_log':lambda text:None}
-exec(compile(ast.Module(body=nodes),'focused-surface','exec'),ns)
-def attempt():
-    ns['_surface_request']=(3,42,7,9,'tile')
-    return ns['_finish_on_surface']('new TV',{'id':42},100,None,None,0,None,0,'tile')
-assert attempt() is True and len(finished)==1
-assert place._free_slot is baseline_slot
-slot.is_deco_slot=lambda:True
-assert attempt() is True and len(finished)==2
-finished.pop()
-slot.empty=False
-assert attempt() is False and len(finished)==1 and destroyed==['new TV']
-assert 'no compatible free slot' in speech[-1]
-slot.empty=True; slot.is_valid_for_placement=lambda **kw:False
-assert attempt() is False and len(finished)==1
-assert place._free_slot is baseline_slot
-print('1 focused surface scenario checks passed: stand, slot refusal, transaction and helper restoration')
+class FocusedSurfaceTests(unittest.TestCase):
+    setUp_base = env.PlacementTests.setUp
+    choose = env.PlacementTests.choose
+    ack = env.PlacementTests.ack
+    serial = env.PlacementTests.serial
+    said = env.PlacementTests.said
+    def setUp(self):
+        self.setUp_base()
+        self.slot=env.Slot(deco=True)
+        self.target=env.Obj(77,env.Definition(700,100),slots=[self.slot])
+        self.target.owner=env.world.household
+        env.world.objects[77]=self.target
+        self.focus=patch.object(layers,'focused_target',lambda:self.target)
+        self.focus.start();self.addCleanup(self.focus.stop)
+        self.choose()
+    def request(self):
+        return env.place.place(env.Vec(3,0,4),0,'surface',surface_id=77)
+    def test_validated_decoration_slot_uses_normal_transaction(self):
+        self.assertTrue(self.request());self.assertTrue(self.ack())
+        self.assertEqual(env.world.funds.money,700)
+        placed=env.world.objects[env.place._last['obj_id']]
+        self.assertIs(placed.parent,self.slot)
+        self.assertEqual(placed.moves,[])
+        self.assertEqual(env.world.fgl_calls,[])
+    def test_full_surface_never_falls_back_to_floor(self):
+        self.slot.empty=False
+        self.assertTrue(self.request());self.assertFalse(self.ack())
+        self.assertEqual(env.world.funds.money,1000)
+        self.assertEqual(set(env.world.objects),{77})
+        self.assertTrue(self.said('Nothing was bought'))
+    def test_incompatible_slot_never_uses_a_nearby_surface(self):
+        self.slot._valid=False
+        self.assertTrue(self.request());self.assertFalse(self.ack())
+        self.assertEqual(env.world.funds.money,1000)
+    def test_focus_change_before_acknowledgement_refuses(self):
+        self.assertTrue(self.request());self.target=None
+        self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
+    def test_other_household_surface_refused(self):
+        self.target.owner=999
+        self.assertTrue(self.request());self.assertFalse(self.ack())
+        self.assertEqual(env.world.funds.money,1000)
+    def test_busy_request_does_not_replace_the_selected_surface(self):
+        self.assertTrue(self.request());serial=self.serial()
+        self.assertFalse(env.place.place(env.Vec(9,0,9),0,'surface',surface_id=88))
+        self.assertEqual(env.place._pending['surface_id'],77)
+        self.assertEqual(self.serial(),serial)
+        self.assertTrue(self.ack())
+    def test_attached_children_are_reachable_once_even_with_cycles(self):
+        child=env.Obj(78,env.Definition(701,1))
+        import tyjokr_a11y_tiles as tiles
+        with patch.object(tiles,'children_on',side_effect=lambda o:[child] if o is self.target else [self.target]):
+            self.assertEqual(layers._focus_objects([self.target,child]),[self.target,child])
+
+if __name__=='__main__':unittest.main()

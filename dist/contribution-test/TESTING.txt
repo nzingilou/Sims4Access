@@ -1,5 +1,9 @@
-With The Sims 4 closed: script and main UI go in Mods/TS4_Access; UI Cheats compatibility package goes in Mods/_Overrides only when using UI Cheats. Clear localthumbcache.package after replacing UI packages.
+UPDATED UPSTREAM PLUS LOCAL FIXES
 
-Alt+B > Build my house: test a two-story preset, then custom stacking/basement on a backed-up save. Check actual rooms, doors and stairs.
-Accessibility menu > Events > selected running event > Current event goals. Panels > Photography controls: open camera first. Social Bunny cards expose native actions. Tab/Shift+Tab leaves book text fields for footer navigation. Wedding venues report selected state.
-Offline checks do not confirm live book, wedding, photography or final house placement behavior.
+Script and main UI: Mods/TS4_Access. Optional matching UI Cheats compatibility: Mods/_Overrides. Replace the old files with the game closed; clear localthumbcache.package.
+
+New native controls: Ctrl+Alt+comma/period changes scanner range; Ctrl+Alt+U/D changes target layer; Ctrl+Alt+J labels a room; Ctrl+Alt+I searches the catalog.
+
+Test apartment map markers and property-panel region expansion/unit controls; scenario card speech and its separate Play button from the main menu. Native eligibility and later confirmations remain in control. Then check a two-story house helper and explicit TV/stand placement on a backed-up save.
+
+Chair hints are retained; a dedicated chair-snapping fix is not included. Live scenario, unit selection and construction confirmation remain pending.

@@ -1,0 +1,121 @@
+{
+  "upstream": "adb868c",
+  "previous_commit": "4e4fcac",
+  "base_script_sha256": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
+  "script_sha256": "8175c7def0dd498b6720ef74b9c943b146b602b7920843783e5ddb6c16c271f2",
+  "changed_entries": [
+    "tyjokr_a11y_catalog.pyc",
+    "tyjokr_a11y_chair_alignment.pyc",
+    "tyjokr_a11y_grid.pyc",
+    "tyjokr_a11y_keys.pyc",
+    "tyjokr_a11y_lang.pyc",
+    "tyjokr_a11y_layers.pyc",
+    "tyjokr_a11y_menu.pyc",
+    "tyjokr_a11y_place.pyc",
+    "tyjokr_a11y_plus_build.pyc",
+    "tyjokr_a11y_room_bridge.pyc",
+    "tyjokr_a11y_scanner.pyc",
+    "tyjokr_a11y_settings.pyc",
+    "tyjokr_a11y_shortcuts.pyc",
+    "tyjokr_a11y_surfaces.pyc",
+    "tyjokr_a11y_tiles.pyc",
+    "tyjokr_a11y_wall.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_extensions.pyc",
+    "tyjokr_a11y_holidays.pyc",
+    "tyjokr_a11y_rooms.pyc"
+  ],
+  "removed_entries": [
+    "tyjokr_a11y_contrib.pyc",
+    "tyjokr_a11y_contrib_settings.pyc"
+  ],
+  "unchanged_entries": 48,
+  "previous_source_code_verified": {
+    "tyjokr_a11y_catalog.pyc": [
+      2
+    ],
+    "tyjokr_a11y_grid.pyc": [
+      2
+    ],
+    "tyjokr_a11y_keys.pyc": [
+      2
+    ],
+    "tyjokr_a11y_lang.pyc": [
+      2
+    ],
+    "tyjokr_a11y_layers.pyc": {
+      "hybrid_function_graft": true,
+      "reviewed_function_differences": [
+        "_base_target",
+        "_build_place",
+        "_finish_on_surface",
+        "_focus_objects"
+      ],
+      "review": "Mixed docstring optimization and later slot diagnostics; replaced by upstream-native layers with direct slot validation, covered by focused surface tests."
+    },
+    "tyjokr_a11y_menu.pyc": [
+      2
+    ],
+    "tyjokr_a11y_place.pyc": [
+      2
+    ],
+    "tyjokr_a11y_plus_build.pyc": [
+      2
+    ],
+    "tyjokr_a11y_room_bridge.pyc": [
+      0,
+      1
+    ],
+    "tyjokr_a11y_scanner.pyc": {
+      "hybrid_function_graft": true,
+      "all_executable_functions_verified_ignoring_docstrings": true
+    },
+    "tyjokr_a11y_settings.pyc": [
+      2
+    ],
+    "tyjokr_a11y_shortcuts.pyc": [
+      2
+    ],
+    "tyjokr_a11y_surfaces.pyc": [
+      0,
+      1
+    ],
+    "tyjokr_a11y_tiles.pyc": [
+      2
+    ],
+    "tyjokr_a11y_wall.pyc": [
+      0,
+      1
+    ],
+    "tyjokr_a11y_chair_alignment.pyc": [
+      0,
+      1
+    ]
+  },
+  "in_game_validation": "pending",
+  "files": {
+    "TS4_Access.ts4script": "8175c7def0dd498b6720ef74b9c943b146b602b7920843783e5ddb6c16c271f2",
+    "TS4_Access_Compatibility_UICheats.package": "973c997567accd69dac3ad5db93d6ad5c555fe3e82dd3ba8687c6f11c02c5512",
+    "TS4_Access_UI.package": "fa8cf5a8fdd77b3c8b76387d85ced9e165f5b566025bf0bd0557191ef8fe8f3a"
+  },
+  "game": "1.129.39.1030",
+  "uicheats": "1.59.1",
+  "validation": {
+    "input_stable": true,
+    "passed": false,
+    "passing_suites": 128,
+    "total_suites": 129,
+    "checks": 1740,
+    "failures": [
+      "tools/test_prelaunch_helper.py"
+    ],
+    "main_fidelity_comparisons": 63,
+    "compat_fidelity_comparisons": 19,
+    "shared_methods": 61,
+    "shared_copies": 29,
+    "unchanged_routing_methods": 44,
+    "class_sets_and_non_code_tags_preserved": true,
+    "in_game": "pending"
+  }
+}

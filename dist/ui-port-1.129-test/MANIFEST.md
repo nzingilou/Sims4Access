@@ -1,8 +1,11 @@
-# Changed code
+# Developer manifest
 
-- flash/TooltipManager_patched.as: native card/input traversal, state readback and bounded event/photography focus; function starting lines: A11yEventGoalFind 3752, A11yEventGoals 3802, A11yPhotography 3846, A11yCompositeRow 6781, A11yCollectFocusables 5170, A11yAnnounceDisplay 8412, A11yCheckboxState 8019, A11yActivate 7864. Rebuilt all 29 shared definitions.
-- Scripts/tyjokr_a11y_event_goals.py: native goal query/reply lifetime; hub.py: event action and photography panel entries; lang.py: their labels.
-- Scripts/tyjokr_a11y_house_workflow.py and tyjokr_a11y_basement.py: unified plan review, fresh native floor ranges, basement tool confirmation and verification diagnostics.
-- Scripts/tyjokr_a11y_build_coordinates.py, tyjokr_a11y_build_helpers.py and flash/extra-classes/ControlPanel.as: measured viewport/client coordinates, native floor query and verified floor/stair integration.
-- contrib-reference/modules/tyjokr_a11y_contrib.py: adapter installation hooks. tools/test_*: focused regression fixtures.
-- changed-source contains cumulative changed source; CHANGES.patch is reversible against 127ec613e8a430ee841cca54d617901f1409ea56. BUILD-HASHES.json identifies compiled files.
+Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
+
+- Scripts/tyjokr_a11y_extensions.py: one queued startup for remaining local helpers. Old contrib/settings bootstrap modules and duplicate wall/layer/surface sources are removed.
+- Scripts/tyjokr_a11y_layers.py, grid.py and place.py: attached-content focus and explicit surface targeting use native slot validation and the original placement/payment transaction.
+- Scripts/tyjokr_a11y_rooms.py and room_bridge.py: custom labels take priority over cached inferred Plus room names; the bridge no longer patches grid functions.
+- Scripts/tyjokr_a11y_settings.py and menu.py: chair-hint toggle and legacy-key migration alongside upstream settings.
+- flash/TooltipManager_patched.as: scenario group/card traversal and narration; native apartment-marker focus/activation; rental region/building traversal. Earlier local UI repairs are retained.
+- flash/extra-classes/PlexLotSelectOverlay.as: two helpers map the exact native clip to its lot data and call the existing validated selection handler. rebuild_all.ps1 adds this class to the existing GameEntryDock movie.
+- Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.

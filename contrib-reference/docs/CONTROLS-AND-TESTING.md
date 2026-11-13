@@ -2,11 +2,11 @@
 
 ## Build Helper
 
-Press `Alt+B` in Build mode to open the Build Helper. The contribution adds these menu actions; they do not have separate global shortcuts:
+Press `Alt+B` in Build mode to open the Build Helper. The retained local extensions add these menu actions; they do not have separate global shortcuts:
 
 While the contribution is loaded, its menu wrapper hides the baseline **Put a roof on my house** and **Describe the lot** rows. Their code is unchanged; removing the contribution restores both rows.
 
-- Configurable stacked house
+- Build my house (unified presets and configurable stories)
 - Build a detached small structure
 - Lot planning grid
 - Turn lot planning descriptions off
@@ -45,11 +45,11 @@ The winter-garden preset builds an enclosed room. Add large windows afterward us
 
 To place a TV or other compatible catalog object on furniture: select the ground layer, press `1` until the supporting furniture is announced as **Focused**, then press Enter. A full or incompatible surface refuses purchase. Objects merely listed in “Objects here” are not selected surface targets. This path requires in-game testing with the chosen TV and stand.
 
-- `Ctrl+,`: previous scanner scope.
-- `Ctrl+.`: next scanner scope.
+- `Ctrl+Alt+,`: previous scanner range.
+- `Ctrl+Alt+.`: next scanner range.
 - `M` in the Build grid: select the furniture at the cursor to move; navigate and press `M` again to place it. `Escape` cancels.
-- `Ctrl+Alt+U`: raise the selected wall-object height.
-- `Ctrl+Alt+Shift+U`: lower the selected wall-object height.
+- `Ctrl+Alt+U`: raise the selected target layer/wall-object height.
+- `Ctrl+Alt+D`: lower the selected target layer/wall-object height.
 
 Scanner scopes cycle through 6, 12, 24 and 40 metres, whole lot, this floor and this room. Sims remain unlimited in metre-based scopes.
 
@@ -65,7 +65,8 @@ Scanner scopes cycle through 6, 12, 24 and 40 metres, whole lot, this floor and 
 - `Ctrl+Alt+Z` / `Ctrl+Alt+Y`: undo / redo.
 - `Ctrl+Alt+X`: sell the supported object at the cursor.
 - `Ctrl+Alt+L`: toggle diagnostic logging.
-- `Ctrl+Alt+D`: catalog search; it is not a height shortcut.
+- `Ctrl+Alt+I`: catalog search.
+- `Ctrl+Alt+J`: native room-label list; `a11y.roomlabel <name>` sets a custom name.
 
 ## Chair orientation hints
 

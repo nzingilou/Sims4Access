@@ -272,8 +272,8 @@ def requirement(def_id):
 
 
 _NEEDS = {
-    'wall': ('It hangs on a wall. Wall placement is not available from the grid yet.',
-             'To wisi na ścianie. Umieszczanie na ścianie nie jest jeszcze dostępne z siatki.'),
+    'wall': ('It hangs on a wall. Use the Build cursor, Control Alt B, to hang it.',
+             'To wisi na ścianie. Użyj kursora budowania, Control Alt B, aby to powiesić.'),
     'ceiling': ('It hangs from a ceiling. Ceiling placement is not available from the grid yet.',
                 'To wisi pod sufitem. Umieszczanie pod sufitem nie jest jeszcze dostępne z siatki.'),
     'fence': ('It attaches to a fence. Fence placement is not available from the grid yet.',
@@ -439,7 +439,7 @@ def tile_key(position, level):
 
 # -------------------------------------------------------------------- actions
 
-def _checks(position, level, key, guard):
+def _checks(position, level, key, guard, exact=False):
     """Everything that can refuse before an object exists. Speaks the refusal;
     returns (item, price, need) or None."""
     item = product()
@@ -457,7 +457,12 @@ def _checks(position, level, key, guard):
               item['name'] or _product_name(), '.'])
         return None
     need = requirement(item['id'])
-    if need in _NEEDS:
+    # Bare ground, water, ceiling and fence objects go through here only from
+    # the Build cursor's experimental placement (tyjokr_a11y_surfaces), with
+    # exact=True, so the game's own placement test still decides.
+    import tyjokr_a11y_surfaces as surfaces
+    experimental = exact and surfaces.handles(need)
+    if need in _NEEDS and not experimental:
         _say_text(*_NEEDS[need])
         return None
     try:
@@ -481,7 +486,7 @@ def _checks(position, level, key, guard):
         if not services.active_lot().is_position_on_lot(position):
             _say_text('That point is not on this lot.', 'Ten punkt nie należy do tej parceli.')
             return None
-        if build_buy.is_location_pool(position, level):
+        if build_buy.is_location_pool(position, level) and not (experimental and need == 'water'):
             _say_text('That point is in a pool.', 'Ten punkt jest w basenie.')
             return None
     except Exception as ex:
@@ -492,7 +497,7 @@ def _checks(position, level, key, guard):
     return item, price, need
 
 
-def place(position, level, routing_surface, angle=0.0, exact=False):
+def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None):
     """Ctrl+Alt+Enter on the grid: ask the client to put down EA's held
     product; the object is bought and placed when it answers (a11y.buildhand).
     exact (the Build cursor): put it at position and angle as they are,
@@ -504,12 +509,12 @@ def place(position, level, routing_surface, angle=0.0, exact=False):
         _say_text('Still placing the last one.', 'Trwa umieszczanie poprzedniego obiektu.')
         return False
     settle_owed()
-    if _checks(position, level, key, guard=True) is None:
+    if _checks(position, level, key, guard=True, exact=exact) is None:
         return False
     _pending['serial'] += 1
     serial = _pending['serial']
     _pending.update(at=now, args=(position, level, routing_surface, angle, key, exact),
-                    zone=_zone_id(), product=(product() or {}).get('id'))
+                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id)
     if not _drop_native_hand(serial):
         _pending['args'] = None
         _say_text('The Build tool is not answering. Nothing was bought.',
@@ -565,7 +570,7 @@ def acknowledged(serial, ok):
 
 
 def _execute(position, level, routing_surface, angle, key, exact=False):
-    checked = _checks(position, level, key, guard=False)
+    checked = _checks(position, level, key, guard=False, exact=exact)
     if checked is None:
         return False
     item, price, need = checked
@@ -592,8 +597,19 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
     """Put a freshly created obj in place, then own, register and pay for
     it. Any refusal removes it; an exception is handled by the caller."""
     surface = None
+    surface_id = _pending.get('surface_id')
+    if surface_id is not None:
+        import tyjokr_a11y_layers as layers
+        found = layers.selected_surface_slot(surface_id, obj, level)
+        if found is None:
+            _destroy(obj)
+            _say_text('The focused surface changed or has no compatible free slot. Nothing was bought.',
+                      'Wybrana powierzchnia zmieniła się albo nie ma zgodnego wolnego miejsca. Nic nie kupiono.')
+            return False
+        need = 'slot'
     if need == 'slot':
-        found = _free_slot(obj, position, level)
+        if surface_id is None:
+            found = _free_slot(obj, position, level)
         if found is None or not _put_in_slot(obj, found[0], found[1]):
             _destroy(obj)
             _say_text('It needs a free spot on a desk or table. Move the cursor onto one.',

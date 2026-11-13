@@ -1,18 +1,8 @@
-# Changelog
+# Changes
 
-- Building helpers use client-pixel dimensions and client-to-screen translation without reapplying Windows DPI scaling. This corrects false off-screen refusals and doubled mouse positions at 200% scaling.
-
-- Focused-surface placement now lets the game validate decorative-classified slots too; slot occupancy, validation results and exceptions are logged separately.
-
-- Enter tries an explicitly focused surface for floor/surface-compatible catalog objects. Game-validated free slots are required; full or incompatible surfaces refuse purchase instead of falling back to the floor.
-
-- Room-construction overview retries now widen the camera distance around fixed room bounds; blocked screen points stop drawing and log framing details.
-
-- Added saved scanner scopes: 6/12/24/40 metres, whole lot, current floor, and current room. Sims remain unfiltered in metre modes.
-- Added reversible Build-grid furniture move/sell support, clearer wall/room-side announcements, named-room integration, and validated wall height/anchoring.
-- Added independently configurable, game-validated bare-ground, water, ceiling, fence, and surface-layer placement helpers.
-- Added room/build/lot descriptions, rectangular roof and chimney assistance, stacked-house planning, lot/building naming, and detached-structure planning.
-- Added optional dining-chair and desk-chair orientation hints. Existing fit speech is retained; the hint names the nearest compatible table/desk within two tiles and says toward, away, or side-on. It does not alter placement.
-- Withdrew the experimental UI-package rebase after in-game testing showed scanner Enter requests no longer opened pie menus. Distribution retains the update's original UI package.
-- Adapted surface-layer focus and grid move/sell targeting to the update's current APIs. Repeated `1` presses now include attached contents (for example, a television on its stand), so the focused child can be sold separately; attached-object movement remains safely refused.
-- The additive Build Helper wrapper now hides the original `Put a roof on my house` and `Describe the lot` rows because the accessible roof builder and lot/building description supersede them. Original functions are unchanged and return when the wrapper is removed.
+- Update to upstream adb868c (12 November): native contribution integration, wall-tool improvements, revised controls/settings and holiday announcements.
+- Retire duplicate scanner, wall, layer, surface and settings adapters. Keep remaining local extensions behind one simulation-thread startup hook.
+- Preserve attached-object cycling, focused-surface placement, chair hints and inferred/custom room names in the integrated modules.
+- Expose scenario cards and native Play controls; read native descriptions, difficulty, requirements, roles and goals.
+- Add native apartment-map selection and traverse nested rental-property region/building controls.
+- Retain the house/roof/lot helpers, coordinate and floor fixes, cleaning/away actions, event-goal reader and earlier UI repairs.

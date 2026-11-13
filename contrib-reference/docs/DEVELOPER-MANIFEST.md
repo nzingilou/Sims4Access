@@ -1,19 +1,11 @@
 # Developer manifest
 
-- `tyjokr_a11y_house_planner.py`: `_client_size` and `_client_to_screen` replace the Plus helper's DPI-divided dimensions and DPI-multiplied mouse mapping. Evidence: 2880x1800 display, 1440x900 estimated stage, matching native input/stage cursor values. Offline tests cover fullscreen dimensions and an offset window; in-game confirmation remains pending.
+Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
 
-- `tyjokr_a11y_layers.py`: `_build_place` captures the focused surface and acknowledgement identity; `_finish_on_surface` checks real slot compatibility and delegates ownership/payment to the baseline finish transaction. The temporary slot lookup is restored in `finally`. Regression check: `tools/test_contribution_focused_surface.py`.
-
-- `tyjokr_a11y_house_planner.py`, `_room_overview` / `_point_and_act`: wraps shared overview room drawing with fixed bounds, five increasing camera distances, panel checks and framing logs. Non-overview calls delegate to the baseline. Remove this wrapper assignment to revert this fix.
-
-Baseline: the supplied updated release. Python changes are additive except the existing appended contribution import in `tyjokr_a11y_scanner.pyc`.
-
-- `tyjokr_a11y_contrib.py` (scanner scopes, move integration, optional-module loader).
-- `tyjokr_a11y_contrib_settings.py` (saved contribution settings and flags).
-- `tyjokr_a11y_wall.py`, `tyjokr_a11y_room_bridge.py` (wall anchors, wall sides, named rooms).
-- `tyjokr_a11y_surfaces.py`, `tyjokr_a11y_layers.py` (validated surface requirements and layer focus; focus includes `tiles.children_on` contents, announces their parent, and exposes the selected parent or child to sell/move targeting).
-- `tyjokr_a11y_chair_alignment.py` (announcement-only dining/desk chair relationship hints; `_fit_parts` wrapper and install marker).
-- `tyjokr_a11y_roof_tools.py`, `tyjokr_a11y_house_planner.py`, `tyjokr_a11y_lot_grid.py`, `tyjokr_a11y_detached.py` (separate Build Helper additions; the runtime wrapper filters only the two superseded baseline labels, without modifying their functions).
-- `TS4_Access_UI.package` is the update's original file; the experimental patch rebase is excluded because it broke scanner-to-pie-menu activation in game.
-
-Rollback: restore the supplied `tyjokr_a11y_scanner.pyc` and UI package, then remove the eleven `tyjokr_a11y_*` contribution modules listed above.
+- Scripts/tyjokr_a11y_extensions.py: one queued startup for remaining local helpers. Old contrib/settings bootstrap modules and duplicate wall/layer/surface sources are removed.
+- Scripts/tyjokr_a11y_layers.py, grid.py and place.py: attached-content focus and explicit surface targeting use native slot validation and the original placement/payment transaction.
+- Scripts/tyjokr_a11y_rooms.py and room_bridge.py: custom labels take priority over cached inferred Plus room names; the bridge no longer patches grid functions.
+- Scripts/tyjokr_a11y_settings.py and menu.py: chair-hint toggle and legacy-key migration alongside upstream settings.
+- flash/TooltipManager_patched.as: scenario group/card traversal and narration; native apartment-marker focus/activation; rental region/building traversal. Earlier local UI repairs are retained.
+- flash/extra-classes/PlexLotSelectOverlay.as: two helpers map the exact native clip to its lot data and call the existing validated selection handler. rebuild_all.ps1 adds this class to the existing GameEntryDock movie.
+- Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.

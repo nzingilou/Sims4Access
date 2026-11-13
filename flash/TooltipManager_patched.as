@@ -138,6 +138,7 @@ package olympus.core
       // TS4 Access Plus catalog bridge (merged 2026-10-08): the products of the
       // last listed catalog category, and whether build errors are forwarded.
       protected var mA11yPlusProducts:Array = new Array();
+      protected var mA11yWallModeSaved:int = -1;
       protected var mA11yPlusListening:Boolean = false;
       // Guided New Game (2026-10-13): the step the guide is on during a new
       // family's CAS ("" waiting, "skip" not offered here, "open" a guide
@@ -502,8 +503,17 @@ package olympus.core
                CommunicationManager.SendUIMessage("BBInspectorHideMoveToolPanel");
                result = "ok";
             }
+            else
+            {
+               // Which condition refused, for the log (2026-10-16: a wall
+               // object was refused after a floor object had been placed).
+               this.A11yBuildLog("hand drop denied: controls=" + this.mA11yBuildControls + " keyboard=" + this.mA11yKeyboard +
+                  " lease=" + (getTimer() <= this.mA11yKeyboardLease) + " hud=" + this.A11yWorldHudMode() +
+                  " blocked=" + this.A11yBuildBlocked() + " tool=" + this.A11yBuildToolAllowed() +
+                  " top=" + getQualifiedClassName(this.A11yTopModalWidget()));
+            }
          }
-         catch(e:Error) { result = "denied"; }
+         catch(e:Error) { result = "denied"; this.A11yBuildLog("hand drop error=" + e.message); }
          this.A11yPostToPython("a11y.buildhand",serial + "|" + result);
       }
 
@@ -3112,7 +3122,7 @@ package olympus.core
             // The Build cursor: arrows, Enter, Space, Backspace, Escape, Page
             // Up/Down, Home, Delete, 1-6 and R are its keys while it owns
             // input; ownership is re-derived at the key, as for the scanner.
-            if(this.mA11yBuildGridOn && [8,13,27,32,33,34,36,37,38,39,40,46,49,50,51,52,53,54,82].indexOf(key) >= 0)
+            if(this.mA11yBuildGridOn && [8,13,27,32,33,34,36,37,38,39,40,46,49,50,51,52,53,54,77,82].indexOf(key) >= 0)
             {
                this.A11yModalFrame();
                if(this.A11yBuildGridOwner()) { return true; }
@@ -4020,6 +4030,8 @@ package olympus.core
             if(cmd == "ping") { this.A11yPlusReply("pong"); }
             else if(cmd == "catalog" && parts.length >= 6) { this.A11yPlusCatalog(int(parts[3]),String(parts[4]),String(parts[5])); }
             else if(cmd == "select" && parts.length >= 4) { this.A11yPlusSelect(int(parts[3])); }
+            else if(cmd == "wallsup") { this.A11yWallsUp(); }
+            else if(cmd == "wallsrestore") { this.A11yWallsRestore(); }
             else if(cmd == "browse" && parts.length >= 8) { this.A11yCatalogBrowse(int(parts[3]),String(parts[4]),String(parts[5]),String(parts[6]),decodeURIComponent(String(parts[7]))); }
          }
          catch(e:Error) { this.A11yPlusReply("error|" + e.message); }
@@ -4104,6 +4116,28 @@ package olympus.core
       // single hash with GetTagValueFromHash. A search is the Buy panel's open
       // search (BuildBuyNavigationMain.OnSearch): searchResult.devString, sorted
       // by SEARCHGROUP_OPENSEARCH_SORT. Replies and selection are A11yPlusCatalog's.
+      // Walls up while EA's Build tool hangs a wall object (tyjokr_a11y_wall,
+      // 2026-10-16): with walls down or cut away, a click at hanging height
+      // passes over the drawn wall stub ("Must be placed on a wall"). EA's own
+      // Home/End cycle (CenterInputAdapterBase.CycleWallViewMode) uses
+      // BBGetWallMode and BBSetWallMode; WallViewMode.WALLS_UP is 2. The
+      // player's mode is saved once and restored after the click.
+      public function A11yWallsUp() : void
+      {
+         var mode:Object = CommunicationManager.CallGameService("BBGetWallMode");
+         if(this.mA11yWallModeSaved < 0 && mode != null) { this.mA11yWallModeSaved = int(mode); }
+         CommunicationManager.CallGameService("BBSetWallMode",2);
+         this.A11yPlusReply("wallsup|" + String(mode));
+      }
+
+      public function A11yWallsRestore() : void
+      {
+         if(this.mA11yWallModeSaved < 0) { return; }
+         CommunicationManager.CallGameService("BBSetWallMode",this.mA11yWallModeSaved);
+         this.A11yPlusReply("wallsrestored|" + this.mA11yWallModeSaved);
+         this.mA11yWallModeSaved = -1;
+      }
+
       public function A11yCatalogTags(names:String) : Array
       {
          var categories:Object = getDefinitionByName("gamedata.BuildBuy.constants.FilterCategories");
@@ -5199,6 +5233,11 @@ package olympus.core
             }
             return;
          }
+         if(_loc7_ == "widgets.GameEntry.Dock.controls::PlexClip")
+         {
+            if(this.A11yPlexInfo(param1) != null && this.A11yIntersectsStage(param1)) { param2.push(param1); }
+            return;
+         }
          if(this.A11yKeyboardDecoration(param1)) { return; }
          if(this.A11ySemanticTarget(param1) != param1) { return; }
          if("A11yMotiveText" in param1 || "btnSolve" in param1)
@@ -5230,7 +5269,8 @@ package olympus.core
          // Compound cards retain their readable row and expose only native
          // child actions. No action is synthesized for Social Bunny text rows.
          var childActions:Array = null;
-         if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
+         if(_loc7_ == "widgets.shared.controls.Scenarios::ScenarioCardCellView") { childActions = ["btnPlay"]; }
+         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
          else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView") { childActions = ["btnReaction","btnAddFriend","mcReactionsGrid"]; }
          else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView") { childActions = ["btnReaction","mcReactionsGrid"]; }
          else if(_loc7_ == "widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView") { childActions = ["btnDetails","btnAction"]; }
@@ -6781,6 +6821,7 @@ package olympus.core
       public function A11yCompositeRow(item:DisplayObject) : Boolean
       {
          if(item == null) { return false; }
+         if(getQualifiedClassName(item) == "widgets.shared.controls.Scenarios::ScenarioDisplayGroupCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitRegionCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitLotCellView") { return true; }
          // Options categories are children of a ButtonBar, not one giant
          // button containing every category name.
          if(this.mA11ySimplifiedMenus && this.A11ySimplifiedActive() && getQualifiedClassName(item) == "scaleform.clik.controls::ButtonBar") { return true; }
@@ -6945,6 +6986,74 @@ package olympus.core
          return "";
       }
 
+      public function A11yPlexInfo(item:DisplayObject) : Object
+      {
+         try
+         {
+            if(item == null || getQualifiedClassName(item) != "widgets.GameEntry.Dock.controls::PlexClip" || item.parent == null || !("A11yPlexInfo" in item.parent)) { return null; }
+            return Object(item.parent)["A11yPlexInfo"](item);
+         }
+         catch(e:Error) { }
+         return null;
+      }
+
+      public function A11yPlexActivate(item:DisplayObject) : Boolean
+      {
+         if(item == null || getQualifiedClassName(item) != "widgets.GameEntry.Dock.controls::PlexClip") { return false; }
+         try
+         {
+            var info:Object = this.A11yPlexInfo(item);
+            if(!this.A11yIsLive(item) || info == null || info.enabled != true || (this.mA11yActiveModalRoot != null && !this.A11yIsInside(item,this.mA11yActiveModalRoot)))
+            { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); return true; }
+            this.mA11yActivating = true;
+            var selected:Boolean = Object(item.parent)["A11yPlexSelect"](item);
+            this.mA11yActivating = false;
+            this.A11yPostToPython("a11y.mark","apartment-select-" + String(info.id) + "-" + String(selected));
+            if(!selected) { this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
+         }
+         catch(e:Error) { this.mA11yActivating = false; this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
+         return true;
+      }
+
+      public function A11yScenarioText(item:DisplayObject, result:Array) : void
+      {
+         try
+         {
+            var card:DisplayObject = item;
+            if(card != null && card.parent != null && getQualifiedClassName(card.parent) == "widgets.shared.controls.Scenarios::ScenarioCardCellView") { card = card.parent; }
+            if(card == null || getQualifiedClassName(card) != "widgets.shared.controls.Scenarios::ScenarioCardCellView") { return; }
+            var data:Object = Object(card)["ScenarioData"];
+            if(data == null) { return; }
+            // Use the native rendered name/difficulty/reward and native data
+            // for requirements and goals, even while the card back is hidden.
+            result.length = 0;
+            if(item != card) { this.A11yCollectText(item,result,0,true); }
+            var fields:Array = ["txtName","txtDifficulty","txtDescription","txtPremadeHousehold","txtRewardName"];
+            var index:int = 0;
+            while(index < fields.length)
+            {
+               if(fields[index] in card) { this.A11yCollectText(Object(card)[fields[index]] as DisplayObject,result,0,true); }
+               index = index + 1;
+            }
+            var lists:Array = [data.roles,data.requirements,data.goals];
+            var group:int = 0;
+            while(group < lists.length)
+            {
+               index = 0;
+               if(lists[group] != null)
+               {
+                  while(index < lists[group].length && index < 16)
+                  {
+                     result.push(String(999990 + group) + "|" + String(index) + "|" + lists[group][index].toString());
+                     index = index + 1;
+                  }
+               }
+               group = group + 1;
+            }
+         }
+         catch(e:Error) { }
+      }
+
       public function A11yMapLabel(item:DisplayObject) : String
       {
          var name:String = item != null ? getQualifiedClassName(item) : "";
@@ -6952,6 +7061,14 @@ package olympus.core
          var label:String = "";
          try
          {
+            var apartment:Object = this.A11yPlexInfo(item);
+            if(apartment != null)
+            {
+               data = apartment.lot;
+               label = data.lotName != null ? String(data.lotName) : "";
+               if(label.length == 0 && data.lotDescriptionData != null) { label = data.lotDescriptionData.name.toString(); }
+               return label;
+            }
             // Use EA's public lot data, including localized custom lot names.
             // Keep the actual lot button and all native travel validation.
             if(item == null || !("GetData" in item) || !("lotId" in item)) { return ""; }
@@ -7873,6 +7990,7 @@ package olympus.core
             if(!this.mA11yKeyboard) { return; }
             _loc2_ = this.mA11yFocused;
             if(this.A11ySeasonActivate(_loc2_,confirm)) { return; }
+            if(this.A11yPlexActivate(_loc2_)) { return; }
             if(this.A11yActivateCASName(_loc2_)) { return; }
             if(_loc2_ is TextField)
             {
@@ -7899,7 +8017,7 @@ package olympus.core
                return;
             }
             var readClass:String = getQualifiedClassName(_loc2_);
-            if(readClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaReactionCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
+            if(readClass == "widgets.shared.controls.Scenarios::ScenarioCardCellView" || readClass == "widgets.shared.controls.Scenarios::ScenarioCardListItemCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView" || readClass == "widgets.Gameplay.SocialMedia::SocialMediaReactionCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalCellView" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationGoalIconContainer" || readClass == "widgets.Gameplay.SituationDisplay.controls::SituationMajorGoalIconContainer")
             {
                this.A11yAnnounceDisplay(_loc2_,"a11y.focus_enc",true); return;
             }
@@ -8035,6 +8153,8 @@ package olympus.core
             }
             _loc2_ = getQualifiedClassName(param1);
             if(_loc2_ == "widgets.Gameplay.SimCamera.controls::CameraFilterCellView" || _loc2_ == "widgets.Gameplay.SituationCreation.controls::LocationCellView") { return Object(param1)["Selected"] == true ? "checked" : "unchecked"; }
+            var apartmentState:Object = this.A11yPlexInfo(param1);
+            if(apartmentState != null) { return apartmentState.enabled != true ? "action unavailable" : (apartmentState.selected ? "checked" : "unchecked"); }
             if(this.A11yPickerToggleCell(param1))
             {
                return Object(param1)["Selected"] == true ? "checked" : "unchecked";
@@ -8476,6 +8596,7 @@ package olympus.core
                }
             }
 
+            this.A11yScenarioText(param1,_loc2_);
             _loc7_ = this.A11yMapLabel(param1);
             if(_loc7_.length > 0) { _loc2_ = ["0|0|" + _loc7_]; }
             if("A11yMotiveText" in param1) { _loc2_ = ["0|0|" + Object(param1)["A11yMotiveText"]()]; }
