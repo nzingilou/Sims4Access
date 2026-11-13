@@ -1,0 +1,10 @@
+{
+  "source/contrib-reference/modules/tyjokr_a11y_chair_alignment.py": "01ee2ffc762b420789ef45275e35f7eb14e0355a3fdf5f7ed3505260fbb60a47",
+  "source/Scripts/tyjokr_a11y_chair_snap.py": "580a28dba3f986c3d6b1e891ad7718964fbee35db79b0961b2bd13eda84d7aa3",
+  "source/Scripts/tyjokr_a11y_grid.py": "6504c8364043656c86af3b6e74161fa98f8adf4497ce78b8e99bf14684dc5a81",
+  "source/Scripts/tyjokr_a11y_menu.py": "c1c15ce166ada4b34da6e103e6c09456cff3cff464632cdb6ff9f05534ec7a18",
+  "source/Scripts/tyjokr_a11y_place.py": "0427c19defaf4e940c9364ac5a6589d179e01669bdbed56409498950c8473b08",
+  "source/Scripts/tyjokr_a11y_settings.py": "2f4b21721ed742ad7d9a2dd52c7dbe037d15df1ff91e9f6d787ea1375003cae0",
+  "source/tools/test_build_cursor.py": "299751c51e635630e6cb4869b9523ffc8f001cf4011a15871627a3e2e773c0c2",
+  "source/tools/test_chair_snapping.py": "5af623fc9a52244ca4f08755d766e34e08edf04852ee9293f0d3acfff53805fb"
+}

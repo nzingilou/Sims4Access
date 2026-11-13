@@ -406,3 +406,14 @@ Scenarios: navigate to the readable card and its separate native Play button.
 Apartment map: navigate to a unit marker and press Enter; the normal selection
 and move-in flow remains in control. Rental properties: expand the region
 and navigate through the building to its individual unit controls.
+
+NATIVE CHAIR SNAPPING (EXPERIMENTAL)
+
+Choose a dining chair or desk chair in the catalog. Move the Build cursor
+onto or beside its table/desk and face it. Enter snaps to the nearest free
+compatible native chair seat. The game supplies the exact position and rotation.
+Alternatively, select the ground target layer and press 1 until the intended
+table/desk is Focused, then press Enter. The preview says when a snap seat
+is available. A full or invalid seat refuses purchase.
+Accessibility settings > experimental chair snapping turns this off separately
+from chair-to-table orientation hints. No new shortcut is required.

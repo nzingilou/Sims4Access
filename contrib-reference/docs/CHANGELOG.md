@@ -1,5 +1,7 @@
 # Changes
 
+- Add experimental dining/desk chair snapping to native seats, with attachment verification before payment and a separate settings toggle.
+
 - Update to upstream adb868c (12 November): native contribution integration, wall-tool improvements, revised controls/settings and holiday announcements.
 - Retire duplicate scanner, wall, layer, surface and settings adapters. Keep remaining local extensions behind one simulation-thread startup hook.
 - Preserve attached-object cycling, focused-surface placement, chair hints and inferred/custom room names in the integrated modules.

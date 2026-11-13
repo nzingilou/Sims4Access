@@ -77,3 +77,7 @@ No new shortcut is required. With a dining chair or desk chair selected, ordinar
 The source, bytecode, plan geometry and archive structure were verified outside the game. The Sims 4 performs the final room, door, stair, roof and object placement through its Build UI. Those workers move or drag the game cursor, then inspect the resulting game state and stop when the result differs from the requested geometry. Testing in-game confirms that camera projection, catalog selection and the current game patch allow those mouse-driven actions on the test lot.
 
 If something fails, leave logging enabled, reproduce it once, and keep the TS4 Access log. Relevant contribution lines begin with `contrib:`, `wall:`, `room bridge:`, `surfaces:`, `layers:`, `roof tools:`, `house planner:`, `lot grid:`, `detached builder:`, or `chair alignment:`.
+
+## Native chair snapping (experimental)
+
+Choose a dining or desk chair. Face the adjacent table/desk from the Build cursor, or focus that table/desk with number 1 on the ground layer. Enter uses the closest game-validated native chair slot. The preview identifies the table and seat location; native slot rotation applies automatically. Full or invalid seats refuse purchase. The separate **experimental chair snapping** setting can disable this path while retaining orientation hints.

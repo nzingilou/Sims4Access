@@ -2,7 +2,7 @@
   "upstream": "adb868c",
   "previous_commit": "4e4fcac",
   "base_script_sha256": "5396252694c5597128d897346d62d334fe84a88b56eb91255c04980c1a223774",
-  "script_sha256": "8175c7def0dd498b6720ef74b9c943b146b602b7920843783e5ddb6c16c271f2",
+  "script_sha256": "dc6fdab265df277fa900a35713a464a640661795f686412d7446b261f06c457a",
   "changed_entries": [
     "tyjokr_a11y_catalog.pyc",
     "tyjokr_a11y_chair_alignment.pyc",
@@ -95,7 +95,7 @@
   },
   "in_game_validation": "pending",
   "files": {
-    "TS4_Access.ts4script": "8175c7def0dd498b6720ef74b9c943b146b602b7920843783e5ddb6c16c271f2",
+    "TS4_Access.ts4script": "dc6fdab265df277fa900a35713a464a640661795f686412d7446b261f06c457a",
     "TS4_Access_Compatibility_UICheats.package": "973c997567accd69dac3ad5db93d6ad5c555fe3e82dd3ba8687c6f11c02c5512",
     "TS4_Access_UI.package": "fa8cf5a8fdd77b3c8b76387d85ced9e165f5b566025bf0bd0557191ef8fe8f3a"
   },

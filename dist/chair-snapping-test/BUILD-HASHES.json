@@ -1,0 +1,29 @@
+{
+  "base_commit": "432f0480794a8c08140901ea0c38cda3c5a22364",
+  "base_script_sha256": "8175c7def0dd498b6720ef74b9c943b146b602b7920843783e5ddb6c16c271f2",
+  "script_sha256": "dc6fdab265df277fa900a35713a464a640661795f686412d7446b261f06c457a",
+  "changed_entries": [
+    "tyjokr_a11y_chair_alignment.pyc",
+    "tyjokr_a11y_grid.pyc",
+    "tyjokr_a11y_menu.pyc",
+    "tyjokr_a11y_place.pyc",
+    "tyjokr_a11y_settings.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_chair_snap.pyc"
+  ],
+  "unchanged_entries": 62,
+  "ui_changed": false,
+  "required_ui": {
+    "main": "fa8cf5a8fdd77b3c8b76387d85ced9e165f5b566025bf0bd0557191ef8fe8f3a",
+    "compatibility": "973c997567accd69dac3ad5db93d6ad5c555fe3e82dd3ba8687c6f11c02c5512"
+  },
+  "in_game_validation": "pending",
+  "validation": {
+    "passed_suites": 129,
+    "total_suites": 130,
+    "checks": 1763,
+    "input_stable": true,
+    "known_failure": "Unchanged Windows prelaunch helper timeout"
+  }
+}

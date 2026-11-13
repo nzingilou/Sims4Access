@@ -110,6 +110,8 @@ def _hint_parts(frame):
     if selected is None:
         return []
     item, details = selected
+    import tyjokr_a11y_chair_snap as chair_snap
+    if chair_snap.has_target(item,frame):return []
     chair_label, target_tag, target_label = details
     i, j = grid._tile
     target = _nearest_target(frame, i, j, grid._level, target_tag)

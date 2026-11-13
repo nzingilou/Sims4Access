@@ -623,6 +623,9 @@ def _fit_parts(f, with_facing=True, objects=None):
     if item is None:
         return []
     need = place.requirement(item['id'])
+    import tyjokr_a11y_chair_snap as chair_snap
+    snap_parts=chair_snap.fit_parts(item,f)
+    if snap_parts is not None:return snap_parts
     i, j = _tile
     import tyjokr_a11y_surfaces as surfaces_mod
     if need == 'wall':
@@ -793,6 +796,13 @@ def _build_place():
     import tyjokr_a11y_surfaces as surfaces_mod
     if surfaces_mod.handles(need):
         return surfaces_mod.place(item, need)
+    import tyjokr_a11y_chair_snap as chair_snap
+    snap_frame=tiles.frame()
+    if snap_frame is not None:
+        snapped=chair_snap.try_place(item,snap_frame)
+        if snapped is not None:
+            _offer=None
+            return snapped
     import tyjokr_a11y_layers as layers
     focused = layers.focused_target() if need in (None, 'slot') else None
     if focused is not None and layers.surface_slots(focused):

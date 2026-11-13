@@ -1,0 +1,666 @@
+diff --git a/CONTROLS.txt b/CONTROLS.txt
+index 9b356aa..15bf61b 100644
+--- a/CONTROLS.txt
++++ b/CONTROLS.txt
+@@ -406,3 +406,14 @@ Scenarios: navigate to the readable card and its separate native Play button.
+ Apartment map: navigate to a unit marker and press Enter; the normal selection
+ and move-in flow remains in control. Rental properties: expand the region
+ and navigate through the building to its individual unit controls.
++
++NATIVE CHAIR SNAPPING (EXPERIMENTAL)
++
++Choose a dining chair or desk chair in the catalog. Move the Build cursor
++onto or beside its table/desk and face it. Enter snaps to the nearest free
++compatible native chair seat. The game supplies the exact position and rotation.
++Alternatively, select the ground target layer and press 1 until the intended
++table/desk is Focused, then press Enter. The preview says when a snap seat
++is available. A full or invalid seat refuses purchase.
++Accessibility settings > experimental chair snapping turns this off separately
++from chair-to-table orientation hints. No new shortcut is required.
+diff --git a/Scripts/tyjokr_a11y_chair_snap.py b/Scripts/tyjokr_a11y_chair_snap.py
+new file mode 100644
+index 0000000..ca9abf9
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_chair_snap.py
+@@ -0,0 +1,236 @@
++"""Dining/desk chair snapping through native Build/Buy attachment slots.
++
++No guessed chair offsets or rotation, no input polling and no game actions
++until the ordinary placement acknowledgement/ownership/payment transaction.
++"""
++import math
++import tyjokr_a11y_speech as speech
++
++CHAIRS = {'buycatssdiningchair': 'buycatssdiningtable',
++          'buycatssdeskchair': 'buycatssdesk'}
++MAX_SLOTS = 128
++
++
++def _log(text):
++    speech.log_line('chair snap: '+text)
++
++
++def _tags(definition):
++    from tag import Tag
++    result=set()
++    try:values=definition.get_tags() or ()
++    except (AttributeError,TypeError):return result
++    for value in values:
++        try:result.add(str(Tag(value).name).lower().replace('_',''))
++        except (ValueError,TypeError,AttributeError):pass
++    return result
++
++
++def _kind(item):
++    import services
++    import tyjokr_a11y_settings as settings
++    if not settings.get('chair_snapping', True):return None
++    try:
++        definition=services.definition_manager().get(item['id'], get_fallback_definition_id=False)
++        tags=_tags(definition)
++        for chair,table in CHAIRS.items():
++            if chair in tags:return definition,table
++    except Exception as exc:
++        _log('classification unavailable: {!r}'.format(exc))
++    return None
++
++
++def _root(obj):
++    for _ in range(8):
++        if not getattr(obj,'is_part',False):return obj
++        obj=getattr(obj,'part_owner',None)
++        if obj is None:return None
++    return None
++
++
++def _state(obj):
++    p,q=obj.position,obj.orientation
++    values=tuple(float(v) for v in (p.x,p.y,p.z,q.x,q.y,q.z,q.w))
++    if not all(math.isfinite(v) for v in values):raise ValueError('Non-finite table transform')
++    return int(obj.level),values
++
++
++def _slot_state(slot):
++    p,q=slot.position,slot.transform.orientation
++    values=tuple(float(v) for v in (p.x,p.y,p.z,q.x,q.y,q.z,q.w))
++    if not all(math.isfinite(v) for v in values):raise ValueError('Non-finite seat transform')
++    return values
++
++
++def _safe_target(obj, level):
++    import services
++    import tyjokr_a11y_place as place
++    try:
++        return (obj is not None and not getattr(obj,'is_part',False)
++                and int(obj.level)==int(level) and not obj.is_in_inventory() and not obj.is_hidden()
++                and obj.get_household_owner_id() in (None,0,place._household_id())
++                and services.active_lot().is_position_on_lot(obj.position))
++    except (AttributeError,TypeError,ValueError):return False
++
++
++def _target(item, frame):
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    import tyjokr_a11y_tiles as tiles
++    kind=_kind(item)
++    if kind is None:return None
++    definition,wanted=kind
++    focused=layers.focused_target()
++    if focused is not None and wanted in _tags(focused.definition) and _safe_target(focused,grid._level):
++        return definition,focused,True
++    i,j=grid._tile
++    candidates={}
++    for di in range(-1,2):
++        for dj in range(-1,2):
++            if not frame.inside(i+di,j+dj):continue
++            if di or dj:
++                side=(1 if di>0 else 3) if abs(di)>abs(dj) else (0 if dj>0 else 2)
++                if int(grid._facing)%4 != side:continue
++            for obj in tiles.objects_on(frame,i+di,j+dj,grid._level):
++                if not _safe_target(obj,grid._level) or wanted not in _tags(obj.definition):continue
++                row=(di*di+dj*dj,obj)
++                if obj.id not in candidates or row[0]<candidates[obj.id][0]:candidates[obj.id]=row
++    rows=sorted(candidates.values(),key=lambda row:(row[0],row[1].id))
++    if not rows:return None
++    if len(rows)>1 and rows[0][0]==rows[1][0]:return definition,None,False
++    return definition,rows[0][1],False
++
++
++def _slots(table):
++    # The native SlotComponent yields part-owned slots and may also yield the
++    # root-owned version of the same bone. Prefer the actual table part.
++    found={}
++    for index,slot in enumerate(table.get_runtime_slots_gen()):
++        if index>=MAX_SLOTS:raise ValueError('Too many attachment slots to check safely')
++        if _root(slot.owner) is not table:continue
++        key=int(slot.slot_name_hash)
++        if key not in found or getattr(slot.owner,'is_part',False):found[key]=slot
++    return list(found.values())
++
++
++def _key(slot):
++    owner=slot.owner
++    return int(slot.slot_name_hash),(int(owner.part_group_index) if getattr(owner,'is_part',False) else None)
++
++
++def _seat(table, definition, point, obj=None, key=None):
++    ranked=[]
++    for slot in _slots(table):
++        try:
++            if key is not None and _key(slot)!=tuple(key):continue
++            if not slot.is_enabled or not slot.empty or slot.is_deco_slot():continue
++            p=slot.position
++            distance=(float(p.x)-float(point.x))**2+(float(p.z)-float(point.z))**2
++            if not math.isfinite(distance):continue
++            ranked.append((distance,_key(slot),slot))
++        except Exception as exc:_log('slot metadata refused: {!r}'.format(exc))
++    for _distance,_ident,slot in sorted(ranked,key=lambda row:(row[0],row[1][0])):
++        try:
++            valid=(slot.is_valid_for_placement(definition=definition) if obj is None
++                   else slot.is_valid_for_placement(obj=obj))
++            _log('table {} slot {} native validation={!r}'.format(table.id,_key(slot),valid))
++            if valid:return slot
++        except Exception as exc:_log('native slot check failed: {!r}'.format(exc))
++    return None
++
++
++def _request(item, frame):
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    import tyjokr_a11y_tiles as tiles
++    target=_target(item,frame)
++    if target is None:return None,None
++    definition,table,explicit=target
++    if table is None:return None,'More than one table is equally close. Focus the intended table with 1 first.'
++    point=tiles.position(frame,*grid._tile,grid._level)
++    slot=_seat(table,definition,point)
++    if slot is None:return None,'The table has no free compatible chair seat that the game accepts. Nothing was bought.'
++    focused=layers.focused_target()
++    request={'zone':int(services.current_zone_id()),'product':int(item['id']),
++             'table':int(table.id),'definition':int(table.definition.id),'state':_state(table),'slot':_key(slot),'slot_state':_slot_state(slot),
++             'tile':tuple(grid._tile),'level':int(grid._level),'facing':int(grid._facing),
++             'focused':getattr(focused,'id',None),'seat_tile':tuple(frame.tile_of(slot.position.x,slot.position.z))}
++    return request,None
++
++
++def try_place(item, frame):
++    """None delegates ordinary placement; bool means the chair path handled it."""
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_place as place
++    try:
++        request,error=_request(item,frame)
++        if request is None and error is None:return None
++        if error:
++            speech.speak(error,explicit=True);return False
++        target=grid.cursor()
++        if target is None:return False
++        return place.place(target[0],grid._level,grid._surface(),chair_request=request)
++    except Exception as exc:
++        _log('request refused: {!r}'.format(exc))
++        speech.speak('The chair seat could not be checked. Nothing was bought.',explicit=True)
++        return False
++
++
++def validate(request, obj, item, position, level):
++    """Recheck exact target/slot after the native tool-drop acknowledgement."""
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    try:
++        if (request['zone']!=int(services.current_zone_id()) or request['product']!=int(item['id'])
++                or request['tile']!=tuple(grid._tile) or request['level']!=int(grid._level)
++                or request['facing']!=int(grid._facing) or int(level)!=request['level']
++                or request['focused']!=getattr(layers.focused_target(),'id',None)):return None
++        kind=_kind(item)
++        if kind is None:return None
++        table=services.object_manager().get(request['table'])
++        if not _safe_target(table,level) or _state(table)!=request['state'] or int(table.definition.id)!=request['definition']:return None
++        if kind[1] not in _tags(table.definition):return None
++        slot=_seat(table,kind[0],position,obj=obj,key=request['slot'])
++        if slot is not None and _slot_state(slot)==request['slot_state']:return table,slot
++    except Exception as exc:_log('acknowledged seat refused: {!r}'.format(exc))
++    return None
++
++
++def attached(table,slot,obj):
++    try:
++        hashed=getattr(obj.location,'slot_hash',None) or getattr(obj.location,'joint_name_hash',None)
++        return (_root(obj.parent) is table and int(hashed)==int(slot.slot_name_hash)
++                and any(child is obj for child in slot.children))
++    except Exception as exc:
++        _log('attachment readback failed: {!r}'.format(exc));return False
++
++
++def fit_parts(item,frame):
++    """Describe the same native seat Enter will request, without creating it."""
++    try:
++        request,error=_request(item,frame)
++        if error:return [error.replace(' Nothing was bought.','')+' ']
++        if request is not None:
++            import services
++            import tyjokr_a11y_grid as grid
++            import tyjokr_a11y_tiles as tiles
++            table=services.object_manager().get(request['table'])
++            di,dj=request['seat_tile'][0]-grid._tile[0],request['seat_tile'][1]-grid._tile[1]
++            return ['Chair will snap at ',grid._name(table),'. Seat ',tiles.relative(di,dj),'. Enter places it using the game’s validation. ']
++    except Exception as exc:_log('preview unavailable: {!r}'.format(exc))
++    return None
++
++
++def has_target(item,frame):
++    try:return _target(item,frame) is not None
++    except Exception:return False
++
++
++def announce(obj,item,price,table):
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_scanner as scanner
++    scanner._speak_parts(['Placed ',item.get('name') or 'chair',' at ',grid._name(table),
++                          ' using the game’s chair slot, for {} simoleons.'.format(price)])
++    _log('attached chair {} to table {} and paid {}'.format(obj.id,table.id,price))
+diff --git a/Scripts/tyjokr_a11y_grid.py b/Scripts/tyjokr_a11y_grid.py
+index eb9edb0..56297e7 100644
+--- a/Scripts/tyjokr_a11y_grid.py
++++ b/Scripts/tyjokr_a11y_grid.py
+@@ -623,6 +623,9 @@ def _fit_parts(f, with_facing=True, objects=None):
+     if item is None:
+         return []
+     need = place.requirement(item['id'])
++    import tyjokr_a11y_chair_snap as chair_snap
++    snap_parts=chair_snap.fit_parts(item,f)
++    if snap_parts is not None:return snap_parts
+     i, j = _tile
+     import tyjokr_a11y_surfaces as surfaces_mod
+     if need == 'wall':
+@@ -793,6 +796,13 @@ def _build_place():
+     import tyjokr_a11y_surfaces as surfaces_mod
+     if surfaces_mod.handles(need):
+         return surfaces_mod.place(item, need)
++    import tyjokr_a11y_chair_snap as chair_snap
++    snap_frame=tiles.frame()
++    if snap_frame is not None:
++        snapped=chair_snap.try_place(item,snap_frame)
++        if snapped is not None:
++            _offer=None
++            return snapped
+     import tyjokr_a11y_layers as layers
+     focused = layers.focused_target() if need in (None, 'slot') else None
+     if focused is not None and layers.surface_slots(focused):
+diff --git a/Scripts/tyjokr_a11y_menu.py b/Scripts/tyjokr_a11y_menu.py
+index 3f36ec8..6a07d1b 100644
+--- a/Scripts/tyjokr_a11y_menu.py
++++ b/Scripts/tyjokr_a11y_menu.py
+@@ -65,6 +65,8 @@ ROWS = [
+         help='how far the scanner looks; Control Alt comma and Control Alt period change it'),
+     Row('surface_layer_focus', 'bool', 'layer focus',
+         help='Build cursor: Control Alt U and D choose a layer; number 1 focuses objects on it, number 4 names nearby layers'),
++    Row('chair_snapping', 'bool', 'experimental chair snapping',
++        help='dining and desk chairs: face a nearby table or focus it with 1; the game validates its native seat slot'),
+     Row('chair_alignment_hints', 'bool', 'chair-to-table orientation hints',
+         help='for dining and desk chairs, names the nearest table or desk and facing relation'),
+     Row('experimental_bare_ground', 'bool', 'experimental bare-ground placement',
+diff --git a/Scripts/tyjokr_a11y_place.py b/Scripts/tyjokr_a11y_place.py
+index 7285351..8ae73e4 100644
+--- a/Scripts/tyjokr_a11y_place.py
++++ b/Scripts/tyjokr_a11y_place.py
+@@ -497,7 +497,7 @@ def _checks(position, level, key, guard, exact=False):
+     return item, price, need
+ 
+ 
+-def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None):
++def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None, chair_request=None):
+     """Ctrl+Alt+Enter on the grid: ask the client to put down EA's held
+     product; the object is bought and placed when it answers (a11y.buildhand).
+     exact (the Build cursor): put it at position and angle as they are,
+@@ -514,7 +514,7 @@ def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=N
+     _pending['serial'] += 1
+     serial = _pending['serial']
+     _pending.update(at=now, args=(position, level, routing_surface, angle, key, exact),
+-                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id)
++                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id, chair_request=chair_request)
+     if not _drop_native_hand(serial):
+         _pending['args'] = None
+         _say_text('The Build tool is not answering. Nothing was bought.',
+@@ -598,7 +598,17 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+     it. Any refusal removes it; an exception is handled by the caller."""
+     surface = None
+     surface_id = _pending.get('surface_id')
+-    if surface_id is not None:
++    chair_request = _pending.get('chair_request')
++    if chair_request is not None:
++        import tyjokr_a11y_chair_snap as chair_snap
++        found=chair_snap.validate(chair_request,obj,item,position,level)
++        if found is None:
++            _destroy(obj)
++            _say_text('The chair seat changed or the game refused it. Nothing was bought.',
++                      'Miejsce na krzesło zmieniło się albo gra je odrzuciła. Nic nie kupiono.')
++            return False
++        need='slot'
++    elif surface_id is not None:
+         import tyjokr_a11y_layers as layers
+         found = layers.selected_surface_slot(surface_id, obj, level)
+         if found is None:
+@@ -608,7 +618,7 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+             return False
+         need = 'slot'
+     if need == 'slot':
+-        if surface_id is None:
++        if surface_id is None and chair_request is None:
+             found = _free_slot(obj, position, level)
+         if found is None or not _put_in_slot(obj, found[0], found[1]):
+             _destroy(obj)
+@@ -616,6 +626,11 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+                       'To wymaga wolnego miejsca na biurku lub stole. Przesuń kursor na taki mebel.')
+             return False
+         surface = found[0]
++        if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
++            _destroy(obj)
++            _say_text('The chair did not attach to its seat. Nothing was bought.',
++                      'Krzesło nie zostało przypięte do miejsca. Nic nie kupiono.')
++            return False
+     elif exact:
+         import tyjokr_a11y_tiles as tiles
+         ok, why = tiles.test_fit(obj, item['id'], position, angle, level)
+@@ -657,6 +672,11 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+         _say_text('The lot would not accept it, so nothing was bought.',
+                   'Parcela go nie przyjęła, więc nic nie kupiono.')
+         return False
++    if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
++        _destroy(obj)
++        _say_text('The game did not retain the chair attachment. Nothing was bought.',
++                  'Gra nie zachowała przypięcia krzesła. Nic nie kupiono.')
++        return False
+     if price and not _charge(price):
+         _destroy(obj)
+         _say_text('Payment failed, so nothing was bought.', 'Płatność nie powiodła się, więc nic nie kupiono.')
+@@ -677,7 +697,10 @@ def _after_payment(obj, item, price, owner, surface, position, level, key, exact
+         _quiet_log('place: placed, but recording it failed ({!r})'.format(ex))
+     _quiet_log('place: placed {} {!r} for {}'.format(getattr(obj, 'id', '?'), item.get('name'), price))
+     try:
+-        if exact and surface is None:
++        if _pending.get('chair_request') is not None and surface is not None:
++            import tyjokr_a11y_chair_snap as chair_snap
++            chair_snap.announce(obj,item,price,surface)
++        elif exact and surface is None:
+             _announce_exact(obj, item, price, level, key)
+         else:
+             _announce_placed(obj, item, price, surface, position, level, key)
+diff --git a/Scripts/tyjokr_a11y_settings.py b/Scripts/tyjokr_a11y_settings.py
+index 46516d8..f538ae1 100644
+--- a/Scripts/tyjokr_a11y_settings.py
++++ b/Scripts/tyjokr_a11y_settings.py
+@@ -36,6 +36,7 @@ DEFAULTS = {
+     # experimental placement on bare ground, water, ceilings and fences
+     'surface_layer_focus': True,
+     'chair_alignment_hints': True,
++    'chair_snapping': True,
+     'experimental_bare_ground': True,
+     'experimental_water': True,
+     'experimental_ceiling': True,
+@@ -82,6 +83,7 @@ _FILE_MAP = {
+     ('features', 'scanner range'): 'scanner_range',
+     ('build cursor', 'layer focus'): 'surface_layer_focus',
+     ('build cursor', 'chair alignment hints'): 'chair_alignment_hints',
++    ('build cursor', 'chair snapping'): 'chair_snapping',
+     ('build cursor', 'bare ground'): 'experimental_bare_ground',
+     ('build cursor', 'water'): 'experimental_water',
+     ('build cursor', 'ceiling'): 'experimental_ceiling',
+@@ -109,7 +111,7 @@ _BOOL_KEYS = ('numpad_navigation', 'sim_actions', 'object_names', 'keyboard',
+               'captions', 'startup', 'travel_list', 'build_controls',
+               'scanner_mode', 'logging', 'auto_focus', 'surface_layer_focus',
+               'experimental_bare_ground', 'experimental_water', 'experimental_ceiling',
+-              'experimental_fence', 'chair_alignment_hints')
++              'experimental_fence', 'chair_alignment_hints', 'chair_snapping')
+ SCANNER_RANGES = ('6 meters', '12 meters', '24 meters', '40 meters',
+                   'whole lot', 'this floor', 'this room')
+ 
+@@ -150,6 +152,8 @@ build controls = {build_controls}
+ layer focus = {surface_layer_focus}
+ # Optional chair/table and desk orientation announcements (on/off)
+ chair alignment hints = {chair_alignment_hints}
++# Experimental native chair seats: face a nearby table/desk or focus it with 1
++chair snapping = {chair_snapping}
+ # Experimental placement; the game's own placement test still decides (on/off)
+ bare ground = {experimental_bare_ground}
+ water = {experimental_water}
+@@ -369,6 +373,7 @@ def _render(stored):
+         'scanner_range': sget('scanner_range'),
+         'surface_layer_focus': 'on' if sget('surface_layer_focus') else 'off',
+         'chair_alignment_hints': 'on' if sget('chair_alignment_hints') else 'off',
++        'chair_snapping': 'on' if sget('chair_snapping') else 'off',
+         'experimental_bare_ground': 'on' if sget('experimental_bare_ground') else 'off',
+         'experimental_water': 'on' if sget('experimental_water') else 'off',
+         'experimental_ceiling': 'on' if sget('experimental_ceiling') else 'off',
+diff --git a/contrib-reference/docs/CHANGELOG.md b/contrib-reference/docs/CHANGELOG.md
+index 682a052..7e6c1a8 100644
+--- a/contrib-reference/docs/CHANGELOG.md
++++ b/contrib-reference/docs/CHANGELOG.md
+@@ -1,5 +1,7 @@
+ # Changes
+ 
++- Add experimental dining/desk chair snapping to native seats, with attachment verification before payment and a separate settings toggle.
++
+ - Update to upstream adb868c (12 November): native contribution integration, wall-tool improvements, revised controls/settings and holiday announcements.
+ - Retire duplicate scanner, wall, layer, surface and settings adapters. Keep remaining local extensions behind one simulation-thread startup hook.
+ - Preserve attached-object cycling, focused-surface placement, chair hints and inferred/custom room names in the integrated modules.
+diff --git a/contrib-reference/docs/CONTROLS-AND-TESTING.md b/contrib-reference/docs/CONTROLS-AND-TESTING.md
+index e893361..f169ae3 100644
+--- a/contrib-reference/docs/CONTROLS-AND-TESTING.md
++++ b/contrib-reference/docs/CONTROLS-AND-TESTING.md
+@@ -77,3 +77,7 @@ No new shortcut is required. With a dining chair or desk chair selected, ordinar
+ The source, bytecode, plan geometry and archive structure were verified outside the game. The Sims 4 performs the final room, door, stair, roof and object placement through its Build UI. Those workers move or drag the game cursor, then inspect the resulting game state and stop when the result differs from the requested geometry. Testing in-game confirms that camera projection, catalog selection and the current game patch allow those mouse-driven actions on the test lot.
+ 
+ If something fails, leave logging enabled, reproduce it once, and keep the TS4 Access log. Relevant contribution lines begin with `contrib:`, `wall:`, `room bridge:`, `surfaces:`, `layers:`, `roof tools:`, `house planner:`, `lot grid:`, `detached builder:`, or `chair alignment:`.
++
++## Native chair snapping (experimental)
++
++Choose a dining or desk chair. Face the adjacent table/desk from the Build cursor, or focus that table/desk with number 1 on the ground layer. Enter uses the closest game-validated native chair slot. The preview identifies the table and seat location; native slot rotation applies automatically. Full or invalid seats refuse purchase. The separate **experimental chair snapping** setting can disable this path while retaining orientation hints.
+diff --git a/contrib-reference/docs/DEVELOPER-MANIFEST.md b/contrib-reference/docs/DEVELOPER-MANIFEST.md
+index b69f888..62e7c6e 100644
+--- a/contrib-reference/docs/DEVELOPER-MANIFEST.md
++++ b/contrib-reference/docs/DEVELOPER-MANIFEST.md
+@@ -9,3 +9,5 @@ Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
+ - flash/TooltipManager_patched.as: scenario group/card traversal and narration; native apartment-marker focus/activation; rental region/building traversal. Earlier local UI repairs are retained.
+ - flash/extra-classes/PlexLotSelectOverlay.as: two helpers map the exact native clip to its lot data and call the existing validated selection handler. rebuild_all.ps1 adds this class to the existing GameEntryDock movie.
+ - Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.
++
++- Native chair snapping: Scripts/tyjokr_a11y_chair_snap.py selects and revalidates native seat slots; grid.py (_fit_parts, _build_place) dispatches preview/placement; place.py (place, _finish, _after_payment) verifies attachment before payment. settings.py/menu.py expose the independent experimental toggle. chair_alignment.py suppresses duplicate hints. tools/test_chair_snapping.py covers 23 transaction and targeting cases.
+diff --git a/contrib-reference/modules/tyjokr_a11y_chair_alignment.py b/contrib-reference/modules/tyjokr_a11y_chair_alignment.py
+index 3960c6c..c4e7aa8 100644
+--- a/contrib-reference/modules/tyjokr_a11y_chair_alignment.py
++++ b/contrib-reference/modules/tyjokr_a11y_chair_alignment.py
+@@ -110,6 +110,8 @@ def _hint_parts(frame):
+     if selected is None:
+         return []
+     item, details = selected
++    import tyjokr_a11y_chair_snap as chair_snap
++    if chair_snap.has_target(item,frame):return []
+     chair_label, target_tag, target_label = details
+     i, j = grid._tile
+     target = _nearest_target(frame, i, j, grid._level, target_tag)
+diff --git a/docs/development/audits/chair-snapping-20261113.md b/docs/development/audits/chair-snapping-20261113.md
+index 583741e..d12d0fa 100644
+--- a/docs/development/audits/chair-snapping-20261113.md
++++ b/docs/development/audits/chair-snapping-20261113.md
+@@ -1,5 +1,7 @@
+-# Chair snapping audit
++# Native chair-slot findings
+ 
+-Current chair_alignment adds direction hints only. Grid floor placement checks fit; it does not verify a usable chair/table pair. Explicit focused-surface placement accepts only native compatible empty runtime slots, but chair snapping through that path is not established.
++Game 1.129.39.1030: objects.slots.SlotType tuning explicitly describes Build/Buy slots for chairs. SlotComponent.get_runtime_slots_gen yields native part-owned RuntimeSlots. RuntimeSlot.is_valid_for_placement delegates to build_buy.test_location_for_object; add_child supplies the slot's transform and hash to set_parent. The restaurant seating lookup identifies chairs through table-part children.
+ 
+-The installed Python exposes RestaurantZoneDirector.get_dining_table_by_chair, a read-only restaurant seating lookup, not a general Build placement operation. A dedicated chair assistant still needs a verified native placement path and post-placement seating-link checks. No chair-snapping behavior is added in this update.
++The implementation uses these native slots for dining and desk chairs, with no guessed offsets or yaw. Preview validates the definition; the ordinary native tool-drop acknowledgement precedes object validation. Table, seat, zone, product, cursor and focus are rechecked. Parent/hash/child membership is verified before and after Build/Buy registration, before payment. Full/refused/stale seats never fall back to buying a floor chair. The native-slot helper is independent of orientation hints and has its own experimental setting.
++
++Offline transaction tests cover rejection, stale state, occupied seats, native part/root duplicates, failed parenting and failed payment. Live-game snapping remains pending testing.
+diff --git a/docs/development/changes/chair-snapping.md b/docs/development/changes/chair-snapping.md
+new file mode 100644
+index 0000000..81fbf27
+--- /dev/null
++++ b/docs/development/changes/chair-snapping.md
+@@ -0,0 +1,7 @@
++# Native chair snapping
++
++Adds tyjokr_a11y_chair_snap.py as a plain-function module called by the existing grid and placement transaction. Dining and desk chairs can snap when facing an adjacent compatible table/desk, or when that table/desk is explicitly focused with number 1. The native slot supplies position and rotation; ambiguous table choices require focus.
++
++A definition-only native check previews the exact seat. After the normal tool-drop acknowledgement, the actual chair must pass the same slot's native placement check. Slot attachment is read back before and after registration, and payment follows those checks. Ordinary placement, surface-object placement, and the separate orientation-hint preference keep their existing paths. No keyboard thread, runtime helper replacement or Flash change is added. A separate experimental chair-snapping flag is persisted in the native settings schema.
++
++Tests exercise the real grid entry point and placement/payment implementation with native stand-ins. Live confirmation is pending.
+diff --git a/tools/test_build_cursor.py b/tools/test_build_cursor.py
+index 144ac68..e924c10 100644
+--- a/tools/test_build_cursor.py
++++ b/tools/test_build_cursor.py
+@@ -149,7 +149,9 @@ class CursorTests(unittest.TestCase):
+         self.spoken, self.sent = [], []
+         self.fits = {}
+         patches = [
+-            patch.dict('sys.modules', {'tyjokr_a11y_place': self.place}),
++            patch.dict('sys.modules', {'tyjokr_a11y_place': self.place,
++                # Chair behavior has native-transaction coverage in test_chair_snapping.
++                'tyjokr_a11y_chair_snap': types.SimpleNamespace(try_place=lambda *a:None,fit_parts=lambda *a:None)}),
+             patch.object(grid, 'active', return_value=True),
+             patch.object(grid, '_surface', return_value='surface'),
+             patch.object(grid, '_flash', side_effect=self.sent.append),
+diff --git a/tools/test_chair_snapping.py b/tools/test_chair_snapping.py
+new file mode 100644
+index 0000000..c41a4bd
+--- /dev/null
++++ b/tools/test_chair_snapping.py
+@@ -0,0 +1,136 @@
++"""Native seating slots: preview, exact recheck, parenting and payment failures."""
++import types,sys,unittest
++from unittest.mock import patch
++import test_placement as env
++import tyjokr_a11y_chair_snap as snap
++import tyjokr_a11y_grid as grid
++import tyjokr_a11y_layers as layers
++import tyjokr_a11y_tiles as tiles
++import tyjokr_a11y_settings as settings
++import tyjokr_a11y_scanner as scanner
++
++Q=lambda:types.SimpleNamespace(x=0.,y=0.,z=0.,w=1.)
++class Seat:
++ def __init__(self,owner,ident=100,position=None):
++  self.owner=owner;self.slot_name_hash=ident;self.position=position or env.Vec(3.5,0,3.5)
++  self.transform=types.SimpleNamespace(orientation=Q());self.is_enabled=True;self.occupied=False
++  self.valid=True;self.deco=False;self.calls=[];self.fail_parent=False;self.wrong_hash=False
++ @property
++ def children(self):return [o for o in env.world.objects.values() if getattr(o,'parent',None) is self.owner and getattr(getattr(o,'location',None),'slot_hash',None)==self.slot_name_hash]
++ @property
++ def empty(self):return not self.occupied and not self.children
++ def is_deco_slot(self):return self.deco
++ def is_valid_for_placement(self,*,obj=None,definition=None):
++  self.calls.append(('object' if obj is not None else 'definition',obj or definition));return self.valid
++ def add_child(self,obj):
++  obj.parent=types.SimpleNamespace(is_part=False) if self.fail_parent else self.owner
++  obj.location=types.SimpleNamespace(slot_hash=999 if self.wrong_hash else self.slot_name_hash,joint_name_hash=None)
++  obj.position=self.position;obj.orientation=self.transform.orientation
++
++class Tests(unittest.TestCase):
++ setUp_base=env.PlacementTests.setUp
++ choose=env.PlacementTests.choose;ack=env.PlacementTests.ack;serial=env.PlacementTests.serial;said=env.PlacementTests.said
++ def setUp(self):
++  self.setUp_base();env.place._pending.update(chair_request=None,surface_id=None)
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDiningChair']
++  definition=env.Definition(700,100);definition.get_tags=lambda:['BuyCatSSDiningTable']
++  self.table=env.Obj(77,definition,position=env.Vec(3.5,0,4.5));self.table.orientation=Q();self.table.owner=env.world.household
++  self.part=types.SimpleNamespace(is_part=True,part_owner=self.table,part_group_index=0)
++  self.seat=Seat(self.part);self.table.slots=[self.seat];env.world.objects[77]=self.table
++  self.focus=self.table;self.locations={(3,4):[self.table]}
++  self.frame=types.SimpleNamespace(inside=lambda i,j:True,tile_of=lambda x,z:(int(x),int(z)))
++  self.patches=[patch.dict(sys.modules,tag=types.SimpleNamespace(Tag=lambda value:types.SimpleNamespace(name=value))),
++   patch.object(grid,'_tile',(3,3)),patch.object(grid,'_level',0),patch.object(grid,'_facing',0),
++   patch.object(grid,'cursor',lambda:(env.Vec(grid._tile[0]+.5,0,grid._tile[1]+.5),0,'id')),
++   patch.object(grid,'_surface',lambda:'surface'),patch.object(grid,'_name',lambda obj:'Native table name'),
++   patch.object(layers,'focused_target',lambda:self.focus),
++   patch.object(tiles,'frame',lambda:self.frame),
++   patch.object(tiles,'position',lambda f,i,j,l:env.Vec(i+.5,0,j+.5)),
++   patch.object(tiles,'objects_on',lambda f,i,j,l:self.locations.get((i,j),[])),
++   patch.object(tiles,'relative',lambda di,dj:'relative {}, {}'.format(di,dj)),
++   patch.object(scanner,'_speak_parts',lambda parts:self.parts.append(''.join(str(x) for x in parts))),
++   patch.object(settings,'get',lambda key,default=None:default)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++  self.choose(name='Dining chair')
++ def request(self):return snap.try_place(env.place.product(),self.frame)
++ def test_native_part_seat_sets_rotation_and_uses_original_payment_transaction(self):
++  self.assertTrue(grid._build_place());self.assertTrue(self.ack())
++  obj=env.world.objects[env.place._last['obj_id']]
++  self.assertIs(obj.parent,self.part);self.assertIs(obj.orientation,self.seat.transform.orientation)
++  self.assertEqual(obj.moves,[]);self.assertEqual(env.world.funds.money,700)
++  self.assertEqual([c[0] for c in self.seat.calls],['definition','object'])
++  self.assertTrue(self.said('Native table name'))
++ def test_occupied_seat_refuses_without_creating_or_buying(self):
++  self.seat.occupied=True;self.assertFalse(self.request());self.assertEqual(set(env.world.objects),{77});self.assertEqual(env.world.funds.money,1000)
++ def test_native_definition_refusal_is_authoritative(self):
++  self.seat.valid=False;self.assertFalse(self.request());self.assertEqual(env.world.funds.money,1000)
++ def test_disabled_and_decorative_slots_are_not_seats(self):
++  for attribute in ['is_enabled','deco']:
++   self.seat.is_enabled=True;self.seat.deco=False;setattr(self.seat,attribute,False if attribute=='is_enabled' else True)
++   self.assertFalse(self.request())
++ def test_same_seat_must_still_be_available_at_acknowledgement(self):
++  other=Seat(self.part,101,env.Vec(4.5,0,4.5));self.table.slots.append(other)
++  self.assertTrue(self.request());self.seat.occupied=True;self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000);self.assertEqual(other.calls,[])
++ def test_table_moved_before_acknowledgement_refuses(self):
++  self.assertTrue(self.request());self.table.position=env.Vec(9,0,9)
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_seat_transform_changed_before_acknowledgement_refuses(self):
++  self.assertTrue(self.request());self.seat.position=env.Vec(4.5,0,3.5)
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_focus_or_cursor_change_refuses(self):
++  self.assertTrue(self.request());self.focus=None
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_actual_object_can_be_refused_after_a_valid_preview(self):
++  self.assertTrue(self.request());self.seat.valid=False
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000);self.assertEqual(set(env.world.objects),{77})
++ def test_wrong_parent_is_rejected_before_payment(self):
++  self.seat.fail_parent=True;self.assertTrue(self.request());self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_wrong_slot_hash_is_rejected_before_payment(self):
++  self.seat.wrong_hash=True;self.assertTrue(self.request());self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_registration_must_preserve_the_native_attachment(self):
++  self.assertTrue(self.request())
++  def register(obj):obj.parent=None;return True
++  with patch.object(env.place,'_register',register):self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000)
++ def test_failed_payment_removes_the_chair_and_frees_the_seat(self):
++  env.world.funds.fail_remove='refuse';self.assertTrue(self.request());self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000);self.assertTrue(self.seat.empty)
++ def test_native_part_slot_is_preferred_over_its_root_duplicate(self):
++  root_slot=Seat(self.table,100);self.table.slots=[root_slot,self.seat]
++  self.assertTrue(self.request());self.assertTrue(self.ack());self.assertEqual(root_slot.calls,[])
++ def test_nearby_table_can_snap_without_focusing_it(self):
++  self.focus=None;self.assertTrue(self.request());self.assertTrue(self.ack())
++ def test_facing_away_keeps_ordinary_floor_placement(self):
++  self.focus=None;grid._facing=2;self.assertIsNone(self.request());self.assertEqual(env.place._pending['serial'],0)
++ def test_equally_near_tables_require_explicit_focus(self):
++  self.focus=None;other=env.Obj(78,self.table.definition);other.orientation=Q();self.locations={(2,4):[self.table],(4,4):[other]}
++  self.assertFalse(self.request());self.assertEqual(env.place._pending['serial'],0)
++ def test_unrelated_objects_and_disabled_setting_delegate_unchanged(self):
++  env.world.definitions[501].get_tags=lambda:[];self.assertIsNone(self.request())
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDiningChair']
++  with patch.object(settings,'get',lambda key,default=None:False if key=='chair_snapping' else default):self.assertIsNone(self.request())
++ def test_desk_chair_matches_a_desk(self):
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDeskChair'];self.table.definition.get_tags=lambda:['BuyCatSSDesk']
++  self.assertTrue(self.request());self.assertTrue(self.ack())
++ def test_native_config_can_disable_snapping_independently(self):
++  self.assertEqual(settings._FILE_MAP[('build cursor','chair snapping')],'chair_snapping')
++  saved=dict(settings._stored)
++  try:
++   settings._apply_value('chair_snapping','off')
++   self.assertIs(settings._stored['chair_snapping'],False)
++   self.assertIn('chair snapping = off',settings._render(settings._stored))
++  finally:
++   settings._stored.clear();settings._stored.update(saved)
++ def test_busy_request_cannot_replace_the_requested_seat(self):
++  self.assertTrue(self.request());saved=env.place._pending['chair_request'];serial=self.serial()
++  self.assertFalse(self.request());self.assertIs(env.place._pending['chair_request'],saved)
++  self.assertEqual(self.serial(),serial);self.assertTrue(self.ack())
++ def test_zone_change_drops_the_request_before_creation_or_payment(self):
++  self.assertTrue(self.request());env.world.zone_id=8
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000);self.assertEqual(set(env.world.objects),{77})
++ def test_preview_is_read_only_and_retains_native_names(self):
++  parts=grid._fit_parts(self.frame);self.assertIn('Native table name',parts)
++  self.assertEqual(set(env.world.objects),{77});self.assertEqual(env.world.funds.money,1000);self.assertEqual(env.place._pending['serial'],0)
++
++if __name__=='__main__':unittest.main()

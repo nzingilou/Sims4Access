@@ -65,6 +65,8 @@ ROWS = [
         help='how far the scanner looks; Control Alt comma and Control Alt period change it'),
     Row('surface_layer_focus', 'bool', 'layer focus',
         help='Build cursor: Control Alt U and D choose a layer; number 1 focuses objects on it, number 4 names nearby layers'),
+    Row('chair_snapping', 'bool', 'experimental chair snapping',
+        help='dining and desk chairs: face a nearby table or focus it with 1; the game validates its native seat slot'),
     Row('chair_alignment_hints', 'bool', 'chair-to-table orientation hints',
         help='for dining and desk chairs, names the nearest table or desk and facing relation'),
     Row('experimental_bare_ground', 'bool', 'experimental bare-ground placement',

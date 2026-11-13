@@ -497,7 +497,7 @@ def _checks(position, level, key, guard, exact=False):
     return item, price, need
 
 
-def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None):
+def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None, chair_request=None):
     """Ctrl+Alt+Enter on the grid: ask the client to put down EA's held
     product; the object is bought and placed when it answers (a11y.buildhand).
     exact (the Build cursor): put it at position and angle as they are,
@@ -514,7 +514,7 @@ def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=N
     _pending['serial'] += 1
     serial = _pending['serial']
     _pending.update(at=now, args=(position, level, routing_surface, angle, key, exact),
-                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id)
+                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id, chair_request=chair_request)
     if not _drop_native_hand(serial):
         _pending['args'] = None
         _say_text('The Build tool is not answering. Nothing was bought.',
@@ -598,7 +598,17 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
     it. Any refusal removes it; an exception is handled by the caller."""
     surface = None
     surface_id = _pending.get('surface_id')
-    if surface_id is not None:
+    chair_request = _pending.get('chair_request')
+    if chair_request is not None:
+        import tyjokr_a11y_chair_snap as chair_snap
+        found=chair_snap.validate(chair_request,obj,item,position,level)
+        if found is None:
+            _destroy(obj)
+            _say_text('The chair seat changed or the game refused it. Nothing was bought.',
+                      'Miejsce na krzesło zmieniło się albo gra je odrzuciła. Nic nie kupiono.')
+            return False
+        need='slot'
+    elif surface_id is not None:
         import tyjokr_a11y_layers as layers
         found = layers.selected_surface_slot(surface_id, obj, level)
         if found is None:
@@ -608,7 +618,7 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
             return False
         need = 'slot'
     if need == 'slot':
-        if surface_id is None:
+        if surface_id is None and chair_request is None:
             found = _free_slot(obj, position, level)
         if found is None or not _put_in_slot(obj, found[0], found[1]):
             _destroy(obj)
@@ -616,6 +626,11 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
                       'To wymaga wolnego miejsca na biurku lub stole. Przesuń kursor na taki mebel.')
             return False
         surface = found[0]
+        if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
+            _destroy(obj)
+            _say_text('The chair did not attach to its seat. Nothing was bought.',
+                      'Krzesło nie zostało przypięte do miejsca. Nic nie kupiono.')
+            return False
     elif exact:
         import tyjokr_a11y_tiles as tiles
         ok, why = tiles.test_fit(obj, item['id'], position, angle, level)
@@ -657,6 +672,11 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
         _say_text('The lot would not accept it, so nothing was bought.',
                   'Parcela go nie przyjęła, więc nic nie kupiono.')
         return False
+    if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
+        _destroy(obj)
+        _say_text('The game did not retain the chair attachment. Nothing was bought.',
+                  'Gra nie zachowała przypięcia krzesła. Nic nie kupiono.')
+        return False
     if price and not _charge(price):
         _destroy(obj)
         _say_text('Payment failed, so nothing was bought.', 'Płatność nie powiodła się, więc nic nie kupiono.')
@@ -677,7 +697,10 @@ def _after_payment(obj, item, price, owner, surface, position, level, key, exact
         _quiet_log('place: placed, but recording it failed ({!r})'.format(ex))
     _quiet_log('place: placed {} {!r} for {}'.format(getattr(obj, 'id', '?'), item.get('name'), price))
     try:
-        if exact and surface is None:
+        if _pending.get('chair_request') is not None and surface is not None:
+            import tyjokr_a11y_chair_snap as chair_snap
+            chair_snap.announce(obj,item,price,surface)
+        elif exact and surface is None:
             _announce_exact(obj, item, price, level, key)
         else:
             _announce_placed(obj, item, price, surface, position, level, key)
