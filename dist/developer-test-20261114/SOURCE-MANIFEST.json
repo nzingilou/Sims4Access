@@ -2,7 +2,7 @@
   "base": "adb868c",
   "files": {
     "contrib-reference/docs/AUDIT-2026-11-01.md": "1c3d1e3f36102b3ec5356cf7641acc54df7be847bfd0154604dc5334295401f6",
-    "contrib-reference/docs/CHANGELOG.md": "c3c1ec95a2ae93fda49e2b2c4276ffc472b7b368559387dc385540f735d56c45",
+    "contrib-reference/docs/CHANGELOG.md": "f24944430e5bbacf42bc012f4d3275d90e86f85b464904c515c3fbc4020d2c4b",
     "contrib-reference/docs/CONTROLS-AND-TESTING.md": "8d0689e52623782ca7c3aec8203a28b03e19be92fdf865dbd61099b14de832eb",
     "contrib-reference/docs/DEVELOPER-MANIFEST.md": "e9bbcf48bd15351779659829f0c3b93807de034bed2ec9b8d4b77b6745b2745a",
     "contrib-reference/modules/tyjokr_a11y_chair_alignment.py": "01ee2ffc762b420789ef45275e35f7eb14e0355a3fdf5f7ed3505260fbb60a47",
