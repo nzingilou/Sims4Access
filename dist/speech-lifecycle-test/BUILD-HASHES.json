@@ -1,0 +1,15 @@
+{
+  "base_commit": "b9d1761",
+  "base_script_sha256": "dc6fdab265df277fa900a35713a464a640661795f686412d7446b261f06c457a",
+  "script_sha256": "a7d46eba12d470146ea2169fbf7a6d9cff58322b3bddd62507ae977448e790ff",
+  "changed_entries": [
+    "tyjokr_a11y_speech.pyc"
+  ],
+  "added_entries": [
+    "tyjokr_a11y_speech_process.pyc"
+  ],
+  "unchanged_entries": 67,
+  "logging_default": false,
+  "ui_changed": false,
+  "live_game_test": "pending"
+}

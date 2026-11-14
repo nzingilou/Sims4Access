@@ -8,3 +8,5 @@
 - Expose scenario cards and native Play controls; read native descriptions, difficulty, requirements, roles and goals.
 - Add native apartment-map selection and traverse nested rental-property region/building controls.
 - Retain the house/roof/lot helpers, coordinate and floor fixes, cleaning/away actions, event-goal reader and earlier UI repairs.
+
+- Speech fallback: prevent orphaned PowerShell helpers on parent exit/crash; serialize startup and reap/close children on restart.

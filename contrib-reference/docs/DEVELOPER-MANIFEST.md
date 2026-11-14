@@ -11,3 +11,5 @@ Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
 - Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.
 
 - Native chair snapping: Scripts/tyjokr_a11y_chair_snap.py selects and revalidates native seat slots; grid.py (_fit_parts, _build_place) dispatches preview/placement; place.py (place, _finish, _after_payment) verifies attachment before payment. settings.py/menu.py expose the independent experimental toggle. chair_alignment.py suppresses duplicate hints. tools/test_chair_snapping.py covers 23 transaction and targeting cases.
+
+- Speech lifecycle: Scripts/tyjokr_a11y_speech_process.py (SpeechJob) owns the child with KILL_ON_JOB_CLOSE. speech.py (_try_init_sapi, _dispose_sapi_locked, restart_sapi, stop, _speak_now) serializes ownership, reaps/closes on restart and registers exit cleanup. Ten lifecycle tests include real Windows parent exit/crash.

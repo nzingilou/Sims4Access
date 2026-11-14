@@ -1,0 +1,35 @@
+{
+  "upstream": "adb868c",
+  "previous_local_commit": "b9d1761",
+  "files": {
+    "TS4_Access/TS4_Access.ts4script": "a7d46eba12d470146ea2169fbf7a6d9cff58322b3bddd62507ae977448e790ff",
+    "TS4_Access/TS4_Access_UI.package": "fa8cf5a8fdd77b3c8b76387d85ced9e165f5b566025bf0bd0557191ef8fe8f3a",
+    "_Overrides/TS4_Access_Compatibility_UICheats.package": "973c997567accd69dac3ad5db93d6ad5c555fe3e82dd3ba8687c6f11c02c5512"
+  },
+  "source_files": 103,
+  "script_entries": 69,
+  "speech_change": {
+    "changed": [
+      "tyjokr_a11y_speech.pyc"
+    ],
+    "added": [
+      "tyjokr_a11y_speech_process.pyc"
+    ],
+    "unchanged_entries": 67
+  },
+  "ui_changed_in_this_fix": false,
+  "validation": {
+    "input_stable": true,
+    "passed": false,
+    "passing_suites": 131,
+    "total_suites": 132,
+    "checks": 1779,
+    "failed_suites": [],
+    "skipped_suites": [
+      "tools/test_prelaunch_helper.py"
+    ],
+    "native_windows_lifecycle_tests": "passed",
+    "compiled_speech_checks": 43,
+    "in_game": "pending"
+  }
+}
