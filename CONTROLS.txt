@@ -417,3 +417,6 @@ table/desk is Focused, then press Enter. The preview says when a snap seat
 is available. A full or invalid seat refuses purchase.
 Accessibility settings > experimental chair snapping turns this off separately
 from chair-to-table orientation hints. No new shortcut is required.
+
+UI CHEATS RIGHT-CLICK SUPPORT
+An explicit focused-UI right-click action is built in, but no shortcut is assigned yet. Ordinary Enter remains unchanged. Developers can bind A11yRightClick through the existing input-epoch-fenced UI message route. This targets UI controls, not world/scanner objects.

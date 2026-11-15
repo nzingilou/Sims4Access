@@ -659,7 +659,7 @@ def _send(message_name):
             pass
         import tyjokr_a11y_pump as pump
         posted = (pump.post(_deliver_activation, message_name, _input_epoch)
-                  if message_name in ('A11yActivate', 'A11yToggle')
+                  if message_name in ('A11yActivate', 'A11yToggle', 'A11yRightClick')
                   else pump.post(_deliver, message_name))
         if not posted:
             if message_name != 'A11y|lease':

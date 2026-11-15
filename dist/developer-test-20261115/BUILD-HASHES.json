@@ -1,0 +1,41 @@
+{
+  "ui_compiled_validation": {
+    "main_targeted_comparisons": 63,
+    "compat_targeted_comparisons": 19,
+    "handler_methods": 48,
+    "shared_copies": 29,
+    "routing_methods_unchanged": 40,
+    "class_sets_and_non_code_tags_unchanged": true
+  },
+  "upstream": "adb868c",
+  "previous_local_commit": "b9f5297",
+  "files": {
+    "TS4_Access/TS4_Access.ts4script": "363d7640f624322fdea1691eb4488e931f0f0bd99eeaa514fed01e586b98f802",
+    "TS4_Access/TS4_Access_UI.package": "6828c87ae639cd1519495d5457681629d11c8fc834474e54510661ee66782f4e",
+    "_Overrides/TS4_Access_Compatibility_UICheats.package": "cafe7b55a717ff7ff8266d4b62921cbc41188e76af433b29972b6237263256bb"
+  },
+  "source_files": 112,
+  "script_entries": 69,
+  "latest_script_change": {
+    "changed": [
+      "tyjokr_a11y_keys.pyc"
+    ],
+    "unchanged_entries": 68,
+    "right_click_shortcut": null
+  },
+  "ui_changed_in_this_fix": true,
+  "validation": {
+    "input_stable": true,
+    "passed": false,
+    "passing_suites": 134,
+    "total_suites": 135,
+    "checks": 1830,
+    "failed_suites": [],
+    "skipped_suites": [
+      "tools/test_prelaunch_helper.py"
+    ],
+    "native_windows_lifecycle_tests": "passed",
+    "compiled_speech_checks": 43,
+    "in_game": "pending"
+  }
+}

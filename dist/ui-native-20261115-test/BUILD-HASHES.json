@@ -1,0 +1,12 @@
+{
+  "base_commit": "b9f5297",
+  "base_script_sha256": "a7d46eba12d470146ea2169fbf7a6d9cff58322b3bddd62507ae977448e790ff",
+  "script_sha256": "363d7640f624322fdea1691eb4488e931f0f0bd99eeaa514fed01e586b98f802",
+  "changed_entries": [
+    "tyjokr_a11y_keys.pyc"
+  ],
+  "unchanged_entries": 68,
+  "total_entries": 69,
+  "right_click_shortcut": null,
+  "native_game_verification": "pending"
+}

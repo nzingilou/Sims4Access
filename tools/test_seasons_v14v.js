@@ -5,7 +5,7 @@ function method(name){
  const sig=new RegExp('public function '+name+'\\(([^)]*)\\)\\s*:\\s*\\w+\\s*\\{').exec(source);assert(sig);
  let start=sig.index+sig[0].length,at=start,depth=1;
  while(depth){if(source[at]==='{')depth++;if(source[at]==='}')depth--;at++;}
- const strip=s=>s.replace(/:\s*(DisplayObjectContainer|DisplayObject|Rectangle|String|Object|Boolean|Number|Array|Error|int)\b/g,'').replace(/\s+as\s+(DisplayObjectContainer|DisplayObject)\b/g,'');
+ const strip=s=>s.replace(/:\s*(DisplayObjectContainer|DisplayObject|TextField|Rectangle|String|Object|Boolean|Number|Array|Error|int)\b/g,'').replace(/\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)\b/g,'');
  return vm.runInNewContext('(function('+strip(sig[1])+'){'+strip(source.slice(start,at-1))+'})',{getQualifiedClassName:o=>o.kind||'',DisplayObjectContainer:function(){}});
 }
 const kind='widgets.GameEntry.WorldSelection.SeasonSelect::SeasonSelectContainer';

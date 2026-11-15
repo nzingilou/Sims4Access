@@ -1,0 +1,7 @@
+{
+  "base_commit": "b9f52975585ecb46d6f6f23429daa0f4e7ad1395",
+  "baseline_failed": 12,
+  "baseline_unaffected_passed": 6,
+  "candidate_passed": 18,
+  "note": "Source-executing display-tree fixtures; not a Scaleform/live-game test."
+}

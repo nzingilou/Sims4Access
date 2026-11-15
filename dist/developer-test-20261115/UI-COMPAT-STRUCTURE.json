@@ -1,0 +1,46 @@
+{
+  "movies": [
+    {
+      "movie": "compat_ClassLibraryOlympus",
+      "input_sha256": "cc29f15973a5f777efec938ac7014fd16ee6da5756b34201439bbee97a9a5d04",
+      "output_sha256": "4de507613a5be345ad0ab1b41e71e17cb493c1467da80d6ebce1cadccc4f9fc4",
+      "non_code_tags_unchanged": true,
+      "class_count": 973
+    },
+    {
+      "movie": "compat_TimeControls",
+      "input_sha256": "a05806a2610465db7dcae9e8fa8a35c5b0cab6b2de8d1cee4bd24d21575812cc",
+      "output_sha256": "61f98d28e6635136e58b9f7d616116c449fb45ac53195ac81d1b4d0faeb29bb1",
+      "non_code_tags_unchanged": true,
+      "class_count": 757
+    },
+    {
+      "movie": "compat_SimInfoTray",
+      "input_sha256": "30efc74a4329166528926327ef58e63f8e51f5ebac33b029f76fbbe1e56c72c2",
+      "output_sha256": "66279e590ba7d9444e54de04d4b677a275a2757c63e8b6f94319977a9150944a",
+      "non_code_tags_unchanged": true,
+      "class_count": 866
+    },
+    {
+      "movie": "compat_SimInfoMotivePanel",
+      "input_sha256": "e53b8b76c2fe49994be69fe0dfdec180d3d4dd5c06eca32ec6b38327ac241c22",
+      "output_sha256": "2b1f045deafaba6858589842116cc0151b07bd6485904f55562cfc8ed11c438a",
+      "non_code_tags_unchanged": true,
+      "class_count": 801
+    },
+    {
+      "movie": "compat_SimHub",
+      "input_sha256": "5a1ff8d9b55d5abc47a1c0ba7d2c609948051e1f1df06a623d72a440bb428703",
+      "output_sha256": "fa1066f8900bfd59d5eece75c6ee868fb8e2dceac0fb8f3799e81b7ffaac79fd",
+      "non_code_tags_unchanged": true,
+      "class_count": 748
+    },
+    {
+      "movie": "compat_PickersPurchase",
+      "input_sha256": "9c91fea2891ffadcba29fa9193ffef44a8d32fadf69686cbd124393c16676e33",
+      "output_sha256": "bf1e0570cfac2dab7ada2d0d61f04dd78aeb8b4367dea7a98d6f9a89ed3e7e95",
+      "non_code_tags_unchanged": true,
+      "class_count": 751
+    }
+  ]
+}

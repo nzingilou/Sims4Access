@@ -4577,6 +4577,7 @@ package olympus.core
             CommunicationManager.AddMessageListenerByName("A11yNavNext",this.A11yMsgNext,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yNavPrev",this.A11yMsgPrev,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yActivate",this.A11yMsgActivate,"A11yNarrator");
+            CommunicationManager.AddMessageListenerByName("A11yRightClick",this.A11yMsgRightClick,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yClearFocus",this.A11yMsgClear,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yAutoFocusOn",this.A11yMsgAutoFocusOn,"A11yNarrator");
             CommunicationManager.AddMessageListenerByName("A11yAutoFocusOff",this.A11yMsgAutoFocusOff,"A11yNarrator");
@@ -5266,6 +5267,23 @@ package olympus.core
             return;
          }
 
+         // Preserve the native course heading as a read-only TextField stop,
+         // then expose dishes. Never announce an entire course as one action.
+         if(_loc7_ == "widgets.Restaurant.RestaurantMenu::CourseCellView")
+         {
+            if("txtCourseLabel" in param1)
+            {
+               var courseLabel:TextField = Object(param1)["txtCourseLabel"] as TextField;
+               if(courseLabel != null && courseLabel.text.length > 0 && this.A11yIsLive(courseLabel))
+               {
+                  _loc6_ = courseLabel.getBounds(courseLabel.stage);
+                  if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(courseLabel) || this.A11yCanRevealOnStage(courseLabel)) && this.A11yInListViewport(courseLabel)) { param2.push(courseLabel); }
+               }
+            }
+            if("mcFoodGrid" in param1) { this.A11yCollectFocusables(Object(param1)["mcFoodGrid"] as DisplayObject,param2,param3 + 1); }
+            return;
+         }
+
          // Compound cards retain their readable row and expose only native
          // child actions. No action is synthesized for Social Bunny text rows.
          var childActions:Array = null;
@@ -5273,6 +5291,8 @@ package olympus.core
          else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
          else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView") { childActions = ["btnReaction","btnAddFriend","mcReactionsGrid"]; }
          else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView") { childActions = ["btnReaction","mcReactionsGrid"]; }
+         else if(_loc7_ == "widgets.Gameplay.Clubs.controls::ClubRulesCellView" || _loc7_ == "widgets.shared.controls::RuleCellView" || _loc7_ == "widgets.shared.controls::FoodCellView") { childActions = ["btnDelete"]; }
+         else if(_loc7_ == "widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView") { childActions = ["mcContent"]; }
          else if(_loc7_ == "widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView") { childActions = ["btnDetails","btnAction"]; }
          else if(_loc7_ == "widgets.Exchange.Subscriptions.controls::SubscriptionCellView") { childActions = ["btnFollow","btnBlock","btnUnblock"]; }
          else if(_loc7_ == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitCellView") { childActions = ["btnTravel","btnViewAgreement","btnFillVacancy"]; }
@@ -6456,8 +6476,39 @@ package olympus.core
          var label:Object = null;
          var field:TextField = null;
          var value:String = "";
+         var owner:DisplayObject = null;
+         var ownerName:String = "";
+         var controlName:String = "";
+         var suffix:String = "";
          try
          {
+            // Business dropdowns/outfit buttons display their labels beside
+            // the control. Read the exact linked label, never nearby guesses.
+            owner = item != null ? item.parent : null;
+            if(owner != null)
+            {
+               ownerName = getQualifiedClassName(owner);
+               controlName = item.name;
+               if((ownerName == "widgets.Gameplay.BusinessSettings::ManagementSettingsContainer" && controlName.indexOf("btnDropdown") == 0) || (ownerName == "widgets.Gameplay.BusinessSettings::EmployeeSettingsContainer" && controlName.indexOf("btnOutfit") == 0))
+               {
+                  suffix = controlName.substr(controlName.length - 1);
+                  if((suffix == "1" || suffix == "2" || suffix == "3") && controlName in owner && Object(owner)[controlName] == item && ("txtLabel" + suffix) in owner)
+                  {
+                     label = Object(owner)["txtLabel" + suffix];
+                     field = label as TextField;
+                  }
+               }
+               else if(owner.parent != null && getQualifiedClassName(owner.parent) == "widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView" && "mcContent" in owner.parent && Object(owner.parent)["mcContent"] == owner && (controlName == "btnSalary" || controlName == "btnFire") && controlName in owner && Object(owner)[controlName] == item && "txtSimName" in owner)
+               {
+                  field = Object(owner)["txtSimName"] as TextField;
+               }
+               if(field != null && field.visible && this.A11yIsLive(field))
+               {
+                  value = this.A11yTextValue(field);
+                  if(value != null && value.length > 0) { result.unshift("-999998|0|" + value); }
+                  return;
+               }
+            }
             while(node != null && depth < 4)
             {
                if("lbLabel" in node && "ddDropdown" in node)
@@ -6714,6 +6765,10 @@ package olympus.core
             // Native CellView controller artwork is not an independent action.
             // Follow the parent's explicit link, not a spoken-label heuristic.
             if(item.name == "mcControllerHighlight" && "mcControllerHighlight" in item.parent && Object(item.parent)["mcControllerHighlight"] == item) { return true; }
+            // Jewelry Draw/DisablePicker explicitly switches these branches.
+            // Row reads skip global visibility pruning, so remove only these
+            // known dormant branches, not newly animated controls elsewhere.
+            if(getQualifiedClassName(item.parent) == "widgets.Gameplay.JewelryCrafting::JewelryMaterialCellView" && (item.name == "mcLabels" || item.name == "mcContent" || item.name == "txtNotNeededCrystal") && !item.visible) { return true; }
             // WorldCellView.Draw only fills pack captions for a locked world.
             // Its dormant authoring clips otherwise still contain Pack Name.
             if((item.name == "mcPackInfo" || item.name == "btnUnlock") && getQualifiedClassName(item.parent) == "widgets.GameEntry.WorldSelection.controls::WorldCellView" && "btnUnlock" in item.parent && Object(item.parent)["btnUnlock"] != null && !Object(item.parent)["btnUnlock"].visible) { return true; }
@@ -6822,6 +6877,9 @@ package olympus.core
       {
          if(item == null) { return false; }
          if(getQualifiedClassName(item) == "widgets.shared.controls.Scenarios::ScenarioDisplayGroupCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitRegionCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitLotCellView") { return true; }
+         // Native restaurant courses are headings plus a nested dish grid.
+         // Warning containers have no click handler; their inner buttons do.
+         if(getQualifiedClassName(item) == "widgets.Restaurant.RestaurantMenu::CourseCellView" || getQualifiedClassName(item) == "widgets.shared.controls::ButtonWarningContainer" || getQualifiedClassName(item) == "widgets.Gameplay.RestaurantSettings::GenericTextButtonWarningContainer") { return true; }
          // Options categories are children of a ButtonBar, not one giant
          // button containing every category name.
          if(this.mA11ySimplifiedMenus && this.A11ySimplifiedActive() && getQualifiedClassName(item) == "scaleform.clik.controls::ButtonBar") { return true; }
@@ -8068,6 +8126,126 @@ package olympus.core
          // A queued menu key must not fall back to the whole stage after close.
          if(!this.A11yIsModalScope(this.mA11yScope) && !this.A11yIsModalScope(this.mA11yPendingScope)) { return; }
          this.A11yTabMove(-1);
+      }
+
+      // Unbound explicit UI Cheats action. No keyboard shortcut is assigned.
+      public function A11yRightClickOwner(item:DisplayObject) : Object
+      {
+         var node:DisplayObject = item;
+         var depth:int = 0;
+         var index:int = 0;
+         var cls:Class = null;
+         var extension:Object = null;
+         var bar:DisplayObject = null;
+         var receiver:DisplayObject = null;
+         var receiverDepth:int = 0;
+         var types:Array = ["GenericCheatsExtension","ProgressBarCheatExtension","BuffCheatsExtension","GoalCheatsExtension","RelCheatsExtension","CareerPromotionCheatsExtension","MoneyAndBucksCheatsExtension","BucksCheatsExtension","WeatherEventCheatsExtension","WhimCheatsExtension","MilestonesCheatsExtension"];
+         while(node != null && depth < 8)
+         {
+            if(!this.A11yIsLive(node)) { return null; }
+            if("GetExtension" in node)
+            {
+               index = 0;
+               while(index < types.length)
+               {
+                  try
+                  {
+                     cls = getDefinitionByName("olympus.extensions.cheats." + types[index]) as Class;
+                     // The second argument is false: never attach an extension.
+                     extension = Object(node)["GetExtension"](cls,false);
+                     if(extension != null)
+                     {
+                        bar = node;
+                        if(types[index] == "GenericCheatsExtension" && (!("cheatType" in extension) || !extension["cheatType"])) { extension = null; }
+                        if(types[index] == "ProgressBarCheatExtension")
+                        {
+                           bar = extension["mcProgressBar"] as DisplayObject;
+                           if(bar == null || !("mID" in extension) || !extension["mID"] || !this.A11yIsInside(bar,node)) { extension = null; }
+                        }
+                        if(extension != null && (types[index] == "MoneyAndBucksCheatsExtension" || types[index] == "BucksCheatsExtension" || types[index] == "MilestonesCheatsExtension"))
+                        {
+                           // These extensions' Setup methods attach listeners
+                           // to the supplied child controls, not to Extend().
+                           // Use the nearest real click receiver, never bubble
+                           // to another milestone/category or currency handler.
+                           receiver = item;
+                           receiverDepth = 0;
+                           while(receiver != null && receiverDepth < 8 && this.A11yIsInside(receiver,node))
+                           {
+                              if(this.A11yIsLive(receiver) && receiver.hasEventListener(MouseEvent.CLICK)) { return {owner:receiver,hit:item}; }
+                              if(receiver == node) { break; }
+                              receiver = receiver.parent;
+                              receiverDepth = receiverDepth + 1;
+                           }
+                           extension = null;
+                        }
+                        if(extension != null && this.A11yIsLive(bar)) { return {owner:node,hit:bar}; }
+                     }
+                  }
+                  catch(missing:Error) { }
+                  index = index + 1;
+               }
+            }
+            if(node == this.mA11yScope) { return null; }
+            node = node.parent;
+            depth = depth + 1;
+         }
+         return null;
+      }
+
+      public function A11yTryRightClick() : Boolean
+      {
+         var target:DisplayObject = null;
+         var info:Object = null;
+         var owner:DisplayObject = null;
+         var hit:DisplayObject = null;
+         var bounds:Rectangle = null;
+         var point:Point = null;
+         var event:MouseEventEx = null;
+         try
+         {
+            this.A11yModalFrame();
+            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || this.mA11yStartupActive || this.A11yWorldHudMode() != 1 || this.A11yEditing() || this.mA11yPendingScope != null || this.mA11yIdxDir != 0) { return false; }
+            // GenericCheatsExtension is supplied by UI Cheats, not by the
+            // native base movie. Resolve it at runtime, never import it.
+            if(getDefinitionByName("olympus.extensions.cheats.GenericCheatsExtension") == null) { return false; }
+            target = this.mA11yFocused;
+            if(!this.A11yIsLive(target) || this.mA11yScope == null || !this.A11yIsInside(target,this.mA11yScope)) { return false; }
+            if(this.A11yIsLive(this.mA11yActiveModalRoot) && !this.A11yIsInside(target,this.mA11yActiveModalRoot)) { return false; }
+            info = this.A11yRightClickOwner(target);
+            if(info == null) { return false; }
+            owner = info["owner"] as DisplayObject;
+            hit = info["hit"] as DisplayObject;
+            if(!this.A11yIsLive(owner) || !this.A11yIsLive(hit) || !this.A11yIntersectsStage(hit) || !this.A11yInListViewport(hit)) { return false; }
+            if(("enabled" in owner && Object(owner)["enabled"] == false) || ("mouseEnabled" in owner && Object(owner)["mouseEnabled"] == false)) { return false; }
+            bounds = hit.getBounds(hit);
+            if(bounds == null || bounds.width <= 0 || bounds.height <= 0) { return false; }
+            point = hit.localToGlobal(new Point(bounds.x + bounds.width / 2,bounds.y + bounds.height / 2));
+            if(point == null || !isFinite(point.x) || !isFinite(point.y) || !hit.hitTestPoint(point.x,point.y)) { return false; }
+            if(point.x < 0 || point.y < 0 || point.x >= owner.stage.stageWidth || point.y >= owner.stage.stageHeight) { return false; }
+            point = owner.globalToLocal(point);
+            if(point == null || !isFinite(point.x) || !isFinite(point.y)) { return false; }
+            // Never fall back to a plain MouseEvent: InputUtils requires the
+            // extended right-button identity; a plain event may look like left.
+            event = new MouseEventEx(MouseEvent.CLICK,false,false);
+            event.buttonIdx = MouseEventEx.RIGHT_BUTTON;
+            event.localX = point.x;
+            event.localY = point.y;
+            this.mA11yActivating = true;
+            // One click on the extension owner, no down/up and no bubbling:
+            // avoids firing both the progress bar and its container listener.
+            owner.dispatchEvent(event);
+            this.mA11yActivating = false;
+            this.A11yPostToPython("a11y.mark","right-click|sent|" + getQualifiedClassName(owner) + "|" + event.stageX + "|" + event.stageY);
+            return true;
+         }
+         catch(error:Error) { this.mA11yActivating = false; }
+         return false;
+      }
+
+      public function A11yMsgRightClick(param1:Object = null) : void
+      {
+         if(!this.A11yTryRightClick()) { this.A11yPostToPython("a11y.mark","right-click|blocked"); this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
       }
 
       public function A11yMsgActivate(param1:Object = null) : void

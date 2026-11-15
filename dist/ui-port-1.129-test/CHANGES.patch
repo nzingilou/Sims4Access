@@ -1,5 +1,5 @@
 diff --git a/CONTROLS.txt b/CONTROLS.txt
-index 5f95db5..9b356aa 100644
+index 5f95db5..a4b7cd9 100644
 --- a/CONTROLS.txt
 +++ b/CONTROLS.txt
 @@ -1,316 +1,324 @@
@@ -634,7 +634,7 @@ index 5f95db5..9b356aa 100644
  BUILD CURSOR AND SCANNER EXTRAS (BY DARAINBOWGIRLXX)
  
  Scanner range: Ctrl+Alt+comma and Ctrl+Alt+period step through 6, 12, 24 and 40
-@@ -345,19 +353,56 @@ With the Build cursor on (Ctrl+Alt+B):
+@@ -345,19 +353,70 @@ With the Build cursor on (Ctrl+Alt+B):
  - With Layer focus off in settings, Ctrl+Alt+U and D only set the height
    of a chosen wall object.
  
@@ -707,6 +707,20 @@ index 5f95db5..9b356aa 100644
 +Apartment map: navigate to a unit marker and press Enter; the normal selection
 +and move-in flow remains in control. Rental properties: expand the region
 +and navigate through the building to its individual unit controls.
++
++NATIVE CHAIR SNAPPING (EXPERIMENTAL)
++
++Choose a dining chair or desk chair in the catalog. Move the Build cursor
++onto or beside its table/desk and face it. Enter snaps to the nearest free
++compatible native chair seat. The game supplies the exact position and rotation.
++Alternatively, select the ground target layer and press 1 until the intended
++table/desk is Focused, then press Enter. The preview says when a snap seat
++is available. A full or invalid seat refuses purchase.
++Accessibility settings > experimental chair snapping turns this off separately
++from chair-to-table orientation hints. No new shortcut is required.
++
++UI CHEATS RIGHT-CLICK SUPPORT
++An explicit focused-UI right-click action is built in, but no shortcut is assigned yet. Ordinary Enter remains unchanged. Developers can bind A11yRightClick through the existing input-epoch-fenced UI message route. This targets UI controls, not world/scanner objects.
 diff --git a/Scripts/tyjokr_a11y_away.py b/Scripts/tyjokr_a11y_away.py
 new file mode 100644
 index 0000000..d3e8b1b
@@ -1735,6 +1749,248 @@ index 0000000..c384013
 +        core.HOTKEYS[ord('B')] = (_build_menu, current[1])
 +    build._helper_integration_installed = True
 +    _log('installed')
+diff --git a/Scripts/tyjokr_a11y_chair_snap.py b/Scripts/tyjokr_a11y_chair_snap.py
+new file mode 100644
+index 0000000..ca9abf9
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_chair_snap.py
+@@ -0,0 +1,236 @@
++"""Dining/desk chair snapping through native Build/Buy attachment slots.
++
++No guessed chair offsets or rotation, no input polling and no game actions
++until the ordinary placement acknowledgement/ownership/payment transaction.
++"""
++import math
++import tyjokr_a11y_speech as speech
++
++CHAIRS = {'buycatssdiningchair': 'buycatssdiningtable',
++          'buycatssdeskchair': 'buycatssdesk'}
++MAX_SLOTS = 128
++
++
++def _log(text):
++    speech.log_line('chair snap: '+text)
++
++
++def _tags(definition):
++    from tag import Tag
++    result=set()
++    try:values=definition.get_tags() or ()
++    except (AttributeError,TypeError):return result
++    for value in values:
++        try:result.add(str(Tag(value).name).lower().replace('_',''))
++        except (ValueError,TypeError,AttributeError):pass
++    return result
++
++
++def _kind(item):
++    import services
++    import tyjokr_a11y_settings as settings
++    if not settings.get('chair_snapping', True):return None
++    try:
++        definition=services.definition_manager().get(item['id'], get_fallback_definition_id=False)
++        tags=_tags(definition)
++        for chair,table in CHAIRS.items():
++            if chair in tags:return definition,table
++    except Exception as exc:
++        _log('classification unavailable: {!r}'.format(exc))
++    return None
++
++
++def _root(obj):
++    for _ in range(8):
++        if not getattr(obj,'is_part',False):return obj
++        obj=getattr(obj,'part_owner',None)
++        if obj is None:return None
++    return None
++
++
++def _state(obj):
++    p,q=obj.position,obj.orientation
++    values=tuple(float(v) for v in (p.x,p.y,p.z,q.x,q.y,q.z,q.w))
++    if not all(math.isfinite(v) for v in values):raise ValueError('Non-finite table transform')
++    return int(obj.level),values
++
++
++def _slot_state(slot):
++    p,q=slot.position,slot.transform.orientation
++    values=tuple(float(v) for v in (p.x,p.y,p.z,q.x,q.y,q.z,q.w))
++    if not all(math.isfinite(v) for v in values):raise ValueError('Non-finite seat transform')
++    return values
++
++
++def _safe_target(obj, level):
++    import services
++    import tyjokr_a11y_place as place
++    try:
++        return (obj is not None and not getattr(obj,'is_part',False)
++                and int(obj.level)==int(level) and not obj.is_in_inventory() and not obj.is_hidden()
++                and obj.get_household_owner_id() in (None,0,place._household_id())
++                and services.active_lot().is_position_on_lot(obj.position))
++    except (AttributeError,TypeError,ValueError):return False
++
++
++def _target(item, frame):
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    import tyjokr_a11y_tiles as tiles
++    kind=_kind(item)
++    if kind is None:return None
++    definition,wanted=kind
++    focused=layers.focused_target()
++    if focused is not None and wanted in _tags(focused.definition) and _safe_target(focused,grid._level):
++        return definition,focused,True
++    i,j=grid._tile
++    candidates={}
++    for di in range(-1,2):
++        for dj in range(-1,2):
++            if not frame.inside(i+di,j+dj):continue
++            if di or dj:
++                side=(1 if di>0 else 3) if abs(di)>abs(dj) else (0 if dj>0 else 2)
++                if int(grid._facing)%4 != side:continue
++            for obj in tiles.objects_on(frame,i+di,j+dj,grid._level):
++                if not _safe_target(obj,grid._level) or wanted not in _tags(obj.definition):continue
++                row=(di*di+dj*dj,obj)
++                if obj.id not in candidates or row[0]<candidates[obj.id][0]:candidates[obj.id]=row
++    rows=sorted(candidates.values(),key=lambda row:(row[0],row[1].id))
++    if not rows:return None
++    if len(rows)>1 and rows[0][0]==rows[1][0]:return definition,None,False
++    return definition,rows[0][1],False
++
++
++def _slots(table):
++    # The native SlotComponent yields part-owned slots and may also yield the
++    # root-owned version of the same bone. Prefer the actual table part.
++    found={}
++    for index,slot in enumerate(table.get_runtime_slots_gen()):
++        if index>=MAX_SLOTS:raise ValueError('Too many attachment slots to check safely')
++        if _root(slot.owner) is not table:continue
++        key=int(slot.slot_name_hash)
++        if key not in found or getattr(slot.owner,'is_part',False):found[key]=slot
++    return list(found.values())
++
++
++def _key(slot):
++    owner=slot.owner
++    return int(slot.slot_name_hash),(int(owner.part_group_index) if getattr(owner,'is_part',False) else None)
++
++
++def _seat(table, definition, point, obj=None, key=None):
++    ranked=[]
++    for slot in _slots(table):
++        try:
++            if key is not None and _key(slot)!=tuple(key):continue
++            if not slot.is_enabled or not slot.empty or slot.is_deco_slot():continue
++            p=slot.position
++            distance=(float(p.x)-float(point.x))**2+(float(p.z)-float(point.z))**2
++            if not math.isfinite(distance):continue
++            ranked.append((distance,_key(slot),slot))
++        except Exception as exc:_log('slot metadata refused: {!r}'.format(exc))
++    for _distance,_ident,slot in sorted(ranked,key=lambda row:(row[0],row[1][0])):
++        try:
++            valid=(slot.is_valid_for_placement(definition=definition) if obj is None
++                   else slot.is_valid_for_placement(obj=obj))
++            _log('table {} slot {} native validation={!r}'.format(table.id,_key(slot),valid))
++            if valid:return slot
++        except Exception as exc:_log('native slot check failed: {!r}'.format(exc))
++    return None
++
++
++def _request(item, frame):
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    import tyjokr_a11y_tiles as tiles
++    target=_target(item,frame)
++    if target is None:return None,None
++    definition,table,explicit=target
++    if table is None:return None,'More than one table is equally close. Focus the intended table with 1 first.'
++    point=tiles.position(frame,*grid._tile,grid._level)
++    slot=_seat(table,definition,point)
++    if slot is None:return None,'The table has no free compatible chair seat that the game accepts. Nothing was bought.'
++    focused=layers.focused_target()
++    request={'zone':int(services.current_zone_id()),'product':int(item['id']),
++             'table':int(table.id),'definition':int(table.definition.id),'state':_state(table),'slot':_key(slot),'slot_state':_slot_state(slot),
++             'tile':tuple(grid._tile),'level':int(grid._level),'facing':int(grid._facing),
++             'focused':getattr(focused,'id',None),'seat_tile':tuple(frame.tile_of(slot.position.x,slot.position.z))}
++    return request,None
++
++
++def try_place(item, frame):
++    """None delegates ordinary placement; bool means the chair path handled it."""
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_place as place
++    try:
++        request,error=_request(item,frame)
++        if request is None and error is None:return None
++        if error:
++            speech.speak(error,explicit=True);return False
++        target=grid.cursor()
++        if target is None:return False
++        return place.place(target[0],grid._level,grid._surface(),chair_request=request)
++    except Exception as exc:
++        _log('request refused: {!r}'.format(exc))
++        speech.speak('The chair seat could not be checked. Nothing was bought.',explicit=True)
++        return False
++
++
++def validate(request, obj, item, position, level):
++    """Recheck exact target/slot after the native tool-drop acknowledgement."""
++    import services
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_layers as layers
++    try:
++        if (request['zone']!=int(services.current_zone_id()) or request['product']!=int(item['id'])
++                or request['tile']!=tuple(grid._tile) or request['level']!=int(grid._level)
++                or request['facing']!=int(grid._facing) or int(level)!=request['level']
++                or request['focused']!=getattr(layers.focused_target(),'id',None)):return None
++        kind=_kind(item)
++        if kind is None:return None
++        table=services.object_manager().get(request['table'])
++        if not _safe_target(table,level) or _state(table)!=request['state'] or int(table.definition.id)!=request['definition']:return None
++        if kind[1] not in _tags(table.definition):return None
++        slot=_seat(table,kind[0],position,obj=obj,key=request['slot'])
++        if slot is not None and _slot_state(slot)==request['slot_state']:return table,slot
++    except Exception as exc:_log('acknowledged seat refused: {!r}'.format(exc))
++    return None
++
++
++def attached(table,slot,obj):
++    try:
++        hashed=getattr(obj.location,'slot_hash',None) or getattr(obj.location,'joint_name_hash',None)
++        return (_root(obj.parent) is table and int(hashed)==int(slot.slot_name_hash)
++                and any(child is obj for child in slot.children))
++    except Exception as exc:
++        _log('attachment readback failed: {!r}'.format(exc));return False
++
++
++def fit_parts(item,frame):
++    """Describe the same native seat Enter will request, without creating it."""
++    try:
++        request,error=_request(item,frame)
++        if error:return [error.replace(' Nothing was bought.','')+' ']
++        if request is not None:
++            import services
++            import tyjokr_a11y_grid as grid
++            import tyjokr_a11y_tiles as tiles
++            table=services.object_manager().get(request['table'])
++            di,dj=request['seat_tile'][0]-grid._tile[0],request['seat_tile'][1]-grid._tile[1]
++            return ['Chair will snap at ',grid._name(table),'. Seat ',tiles.relative(di,dj),'. Enter places it using the game’s validation. ']
++    except Exception as exc:_log('preview unavailable: {!r}'.format(exc))
++    return None
++
++
++def has_target(item,frame):
++    try:return _target(item,frame) is not None
++    except Exception:return False
++
++
++def announce(obj,item,price,table):
++    import tyjokr_a11y_grid as grid
++    import tyjokr_a11y_scanner as scanner
++    scanner._speak_parts(['Placed ',item.get('name') or 'chair',' at ',grid._name(table),
++                          ' using the game’s chair slot, for {} simoleons.'.format(price)])
++    _log('attached chair {} to table {} and paid {}'.format(obj.id,table.id,price))
 diff --git a/Scripts/tyjokr_a11y_cleanliness.py b/Scripts/tyjokr_a11y_cleanliness.py
 new file mode 100644
 index 0000000..79483d5
@@ -2127,7 +2383,7 @@ index 0000000..9ee05de
 +    speech.log_line('local extensions installed on upstream-native contributions')
 +
 diff --git a/Scripts/tyjokr_a11y_grid.py b/Scripts/tyjokr_a11y_grid.py
-index d17aef0..eb9edb0 100644
+index d17aef0..56297e7 100644
 --- a/Scripts/tyjokr_a11y_grid.py
 +++ b/Scripts/tyjokr_a11y_grid.py
 @@ -602,7 +602,7 @@ def _room_parts(f):
@@ -2139,10 +2395,27 @@ index d17aef0..eb9edb0 100644
      if previous_outside is not None and outside is not None and outside != previous_outside:
          if outside:
              parts.append(_text('Outside. ', 'Na zewnątrz. '))
-@@ -793,6 +793,13 @@ def _build_place():
+@@ -623,6 +623,9 @@ def _fit_parts(f, with_facing=True, objects=None):
+     if item is None:
+         return []
+     need = place.requirement(item['id'])
++    import tyjokr_a11y_chair_snap as chair_snap
++    snap_parts=chair_snap.fit_parts(item,f)
++    if snap_parts is not None:return snap_parts
+     i, j = _tile
+     import tyjokr_a11y_surfaces as surfaces_mod
+     if need == 'wall':
+@@ -793,6 +796,20 @@ def _build_place():
      import tyjokr_a11y_surfaces as surfaces_mod
      if surfaces_mod.handles(need):
          return surfaces_mod.place(item, need)
++    import tyjokr_a11y_chair_snap as chair_snap
++    snap_frame=tiles.frame()
++    if snap_frame is not None:
++        snapped=chair_snap.try_place(item,snap_frame)
++        if snapped is not None:
++            _offer=None
++            return snapped
 +    import tyjokr_a11y_layers as layers
 +    focused = layers.focused_target() if need in (None, 'slot') else None
 +    if focused is not None and layers.surface_slots(focused):
@@ -2575,6 +2848,19 @@ index 12a85bc..170547b 100644
               ('day and time', read_clock),
               ('known contacts', contacts.open_contacts)) + build_rows +
              (('waiting call or text', phone.open_waiting),) +
+diff --git a/Scripts/tyjokr_a11y_keys.py b/Scripts/tyjokr_a11y_keys.py
+index 0bc1966..a5f6b28 100644
+--- a/Scripts/tyjokr_a11y_keys.py
++++ b/Scripts/tyjokr_a11y_keys.py
+@@ -659,7 +659,7 @@ def _send(message_name):
+             pass
+         import tyjokr_a11y_pump as pump
+         posted = (pump.post(_deliver_activation, message_name, _input_epoch)
+-                  if message_name in ('A11yActivate', 'A11yToggle')
++                  if message_name in ('A11yActivate', 'A11yToggle', 'A11yRightClick')
+                   else pump.post(_deliver, message_name))
+         if not posted:
+             if message_name != 'A11y|lease':
 diff --git a/Scripts/tyjokr_a11y_lang.py b/Scripts/tyjokr_a11y_lang.py
 index a7b1c03..4eb32a7 100644
 --- a/Scripts/tyjokr_a11y_lang.py
@@ -5005,20 +5291,22 @@ index a6efcf7..e8839bb 100644
 +            _log('surface {} slot {} validation error: {!r}'.format(target_id, index, exc))
 +    return None
 diff --git a/Scripts/tyjokr_a11y_menu.py b/Scripts/tyjokr_a11y_menu.py
-index fa410a4..3f36ec8 100644
+index fa410a4..6a07d1b 100644
 --- a/Scripts/tyjokr_a11y_menu.py
 +++ b/Scripts/tyjokr_a11y_menu.py
-@@ -65,6 +65,8 @@ ROWS = [
+@@ -65,6 +65,10 @@ ROWS = [
          help='how far the scanner looks; Control Alt comma and Control Alt period change it'),
      Row('surface_layer_focus', 'bool', 'layer focus',
          help='Build cursor: Control Alt U and D choose a layer; number 1 focuses objects on it, number 4 names nearby layers'),
++    Row('chair_snapping', 'bool', 'experimental chair snapping',
++        help='dining and desk chairs: face a nearby table or focus it with 1; the game validates its native seat slot'),
 +    Row('chair_alignment_hints', 'bool', 'chair-to-table orientation hints',
 +        help='for dining and desk chairs, names the nearest table or desk and facing relation'),
      Row('experimental_bare_ground', 'bool', 'experimental bare-ground placement',
          help='Build cursor: needs natural ground; the game still checks the spot'),
      Row('experimental_water', 'bool', 'experimental water placement',
 diff --git a/Scripts/tyjokr_a11y_place.py b/Scripts/tyjokr_a11y_place.py
-index acfd32a..7285351 100644
+index acfd32a..8ae73e4 100644
 --- a/Scripts/tyjokr_a11y_place.py
 +++ b/Scripts/tyjokr_a11y_place.py
 @@ -497,7 +497,7 @@ def _checks(position, level, key, guard, exact=False):
@@ -5026,7 +5314,7 @@ index acfd32a..7285351 100644
  
  
 -def place(position, level, routing_surface, angle=0.0, exact=False):
-+def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None):
++def place(position, level, routing_surface, angle=0.0, exact=False, surface_id=None, chair_request=None):
      """Ctrl+Alt+Enter on the grid: ask the client to put down EA's held
      product; the object is bought and placed when it answers (a11y.buildhand).
      exact (the Build cursor): put it at position and angle as they are,
@@ -5035,16 +5323,26 @@ index acfd32a..7285351 100644
      serial = _pending['serial']
      _pending.update(at=now, args=(position, level, routing_surface, angle, key, exact),
 -                    zone=_zone_id(), product=(product() or {}).get('id'))
-+                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id)
++                    zone=_zone_id(), product=(product() or {}).get('id'), surface_id=surface_id, chair_request=chair_request)
      if not _drop_native_hand(serial):
          _pending['args'] = None
          _say_text('The Build tool is not answering. Nothing was bought.',
-@@ -597,8 +597,19 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+@@ -597,14 +597,40 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
      """Put a freshly created obj in place, then own, register and pay for
      it. Any refusal removes it; an exception is handled by the caller."""
      surface = None
 +    surface_id = _pending.get('surface_id')
-+    if surface_id is not None:
++    chair_request = _pending.get('chair_request')
++    if chair_request is not None:
++        import tyjokr_a11y_chair_snap as chair_snap
++        found=chair_snap.validate(chair_request,obj,item,position,level)
++        if found is None:
++            _destroy(obj)
++            _say_text('The chair seat changed or the game refused it. Nothing was bought.',
++                      'Miejsce na krzesło zmieniło się albo gra je odrzuciła. Nic nie kupiono.')
++            return False
++        need='slot'
++    elif surface_id is not None:
 +        import tyjokr_a11y_layers as layers
 +        found = layers.selected_surface_slot(surface_id, obj, level)
 +        if found is None:
@@ -5055,11 +5353,46 @@ index acfd32a..7285351 100644
 +        need = 'slot'
      if need == 'slot':
 -        found = _free_slot(obj, position, level)
-+        if surface_id is None:
++        if surface_id is None and chair_request is None:
 +            found = _free_slot(obj, position, level)
          if found is None or not _put_in_slot(obj, found[0], found[1]):
              _destroy(obj)
              _say_text('It needs a free spot on a desk or table. Move the cursor onto one.',
+                       'To wymaga wolnego miejsca na biurku lub stole. Przesuń kursor na taki mebel.')
+             return False
+         surface = found[0]
++        if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
++            _destroy(obj)
++            _say_text('The chair did not attach to its seat. Nothing was bought.',
++                      'Krzesło nie zostało przypięte do miejsca. Nic nie kupiono.')
++            return False
+     elif exact:
+         import tyjokr_a11y_tiles as tiles
+         ok, why = tiles.test_fit(obj, item['id'], position, angle, level)
+@@ -646,6 +672,11 @@ def _finish(obj, item, price, need, position, level, routing_surface, angle, key
+         _say_text('The lot would not accept it, so nothing was bought.',
+                   'Parcela go nie przyjęła, więc nic nie kupiono.')
+         return False
++    if chair_request is not None and not chair_snap.attached(surface,found[1],obj):
++        _destroy(obj)
++        _say_text('The game did not retain the chair attachment. Nothing was bought.',
++                  'Gra nie zachowała przypięcia krzesła. Nic nie kupiono.')
++        return False
+     if price and not _charge(price):
+         _destroy(obj)
+         _say_text('Payment failed, so nothing was bought.', 'Płatność nie powiodła się, więc nic nie kupiono.')
+@@ -666,7 +697,10 @@ def _after_payment(obj, item, price, owner, surface, position, level, key, exact
+         _quiet_log('place: placed, but recording it failed ({!r})'.format(ex))
+     _quiet_log('place: placed {} {!r} for {}'.format(getattr(obj, 'id', '?'), item.get('name'), price))
+     try:
+-        if exact and surface is None:
++        if _pending.get('chair_request') is not None and surface is not None:
++            import tyjokr_a11y_chair_snap as chair_snap
++            chair_snap.announce(obj,item,price,surface)
++        elif exact and surface is None:
+             _announce_exact(obj, item, price, level, key)
+         else:
+             _announce_placed(obj, item, price, surface, position, level, key)
 diff --git a/Scripts/tyjokr_a11y_room_bridge.py b/Scripts/tyjokr_a11y_room_bridge.py
 new file mode 100644
 index 0000000..c0ec711
@@ -5173,26 +5506,28 @@ index f28b84e..b4a6e17 100644
 +except Exception as _extensions_error:
 +    speech.log_line('local extensions could not be queued: {!r}'.format(_extensions_error))
 diff --git a/Scripts/tyjokr_a11y_settings.py b/Scripts/tyjokr_a11y_settings.py
-index 128287a..46516d8 100644
+index 128287a..f538ae1 100644
 --- a/Scripts/tyjokr_a11y_settings.py
 +++ b/Scripts/tyjokr_a11y_settings.py
-@@ -35,6 +35,7 @@ DEFAULTS = {
+@@ -35,6 +35,8 @@ DEFAULTS = {
      # Build cursor (contributed by DaRainbowGirlXX): target-layer focus and
      # experimental placement on bare ground, water, ceilings and fences
      'surface_layer_focus': True,
 +    'chair_alignment_hints': True,
++    'chair_snapping': True,
      'experimental_bare_ground': True,
      'experimental_water': True,
      'experimental_ceiling': True,
-@@ -80,6 +81,7 @@ _FILE_MAP = {
+@@ -80,6 +82,8 @@ _FILE_MAP = {
      ('features', 'scanner mode'): 'scanner_mode',
      ('features', 'scanner range'): 'scanner_range',
      ('build cursor', 'layer focus'): 'surface_layer_focus',
 +    ('build cursor', 'chair alignment hints'): 'chair_alignment_hints',
++    ('build cursor', 'chair snapping'): 'chair_snapping',
      ('build cursor', 'bare ground'): 'experimental_bare_ground',
      ('build cursor', 'water'): 'experimental_water',
      ('build cursor', 'ceiling'): 'experimental_ceiling',
-@@ -87,6 +89,7 @@ _FILE_MAP = {
+@@ -87,6 +91,7 @@ _FILE_MAP = {
      # legacy: the contribution's own section (October 2026), still read
      ('contribution', 'scanner scope'): 'scanner_range',
      ('contribution', 'surface layer focus'): 'surface_layer_focus',
@@ -5200,32 +5535,269 @@ index 128287a..46516d8 100644
      ('contribution', 'experimental bare ground'): 'experimental_bare_ground',
      ('contribution', 'experimental water'): 'experimental_water',
      ('contribution', 'experimental ceiling'): 'experimental_ceiling',
-@@ -106,7 +109,7 @@ _BOOL_KEYS = ('numpad_navigation', 'sim_actions', 'object_names', 'keyboard',
+@@ -106,7 +111,7 @@ _BOOL_KEYS = ('numpad_navigation', 'sim_actions', 'object_names', 'keyboard',
                'captions', 'startup', 'travel_list', 'build_controls',
                'scanner_mode', 'logging', 'auto_focus', 'surface_layer_focus',
                'experimental_bare_ground', 'experimental_water', 'experimental_ceiling',
 -              'experimental_fence')
-+              'experimental_fence', 'chair_alignment_hints')
++              'experimental_fence', 'chair_alignment_hints', 'chair_snapping')
  SCANNER_RANGES = ('6 meters', '12 meters', '24 meters', '40 meters',
                    'whole lot', 'this floor', 'this room')
  
-@@ -145,6 +148,8 @@ build controls = {build_controls}
+@@ -145,6 +150,10 @@ build controls = {build_controls}
  # ceiling); number 1 focuses objects on it and number 4 names each nearby
  # object's layer (on/off)
  layer focus = {surface_layer_focus}
 +# Optional chair/table and desk orientation announcements (on/off)
 +chair alignment hints = {chair_alignment_hints}
++# Experimental native chair seats: face a nearby table/desk or focus it with 1
++chair snapping = {chair_snapping}
  # Experimental placement; the game's own placement test still decides (on/off)
  bare ground = {experimental_bare_ground}
  water = {experimental_water}
-@@ -363,6 +368,7 @@ def _render(stored):
+@@ -363,6 +372,8 @@ def _render(stored):
          'scanner_mode': 'on' if sget('scanner_mode') else 'off',
          'scanner_range': sget('scanner_range'),
          'surface_layer_focus': 'on' if sget('surface_layer_focus') else 'off',
 +        'chair_alignment_hints': 'on' if sget('chair_alignment_hints') else 'off',
++        'chair_snapping': 'on' if sget('chair_snapping') else 'off',
          'experimental_bare_ground': 'on' if sget('experimental_bare_ground') else 'off',
          'experimental_water': 'on' if sget('experimental_water') else 'off',
          'experimental_ceiling': 'on' if sget('experimental_ceiling') else 'off',
+diff --git a/Scripts/tyjokr_a11y_speech.py b/Scripts/tyjokr_a11y_speech.py
+index 4a9e7ca..4695548 100644
+--- a/Scripts/tyjokr_a11y_speech.py
++++ b/Scripts/tyjokr_a11y_speech.py
+@@ -1,5 +1,9 @@
+ """Screen-reader output through Prism, with configurable Windows speech fallback."""
+ import os
++try:
++    import atexit
++except ImportError:
++    atexit = None  # Kernel job ownership also covers trimmed game Python.
+ import threading
+ import time
+ 
+@@ -62,6 +66,8 @@ _prism = None
+ #   off      speech only, no braille
+ braille_mode = 'concise'
+ _sapi_proc = None
++_sapi_job = None
++_sapi_lock = threading.RLock()
+ _backend_name = 'uninitialized'
+ _last_text = None
+ _last_time = 0.0
+@@ -171,34 +177,78 @@ def _sapi_script():
+     return script
+ 
+ 
++def _dispose_sapi_locked():
++    global _sapi_proc, _sapi_job
++    proc, job = _sapi_proc, _sapi_job
++    _sapi_proc, _sapi_job = None, None
++    # Closing the kernel job also handles a stuck PowerShell startup.
++    if job is not None:
++        job.close()
++    if proc is not None:
++        try:
++            if proc.poll() is None:
++                proc.kill()
++            proc.wait(timeout=1)
++        except Exception as ex:
++            log_line('SAPI child cleanup failed: {!r}'.format(ex))
++        finally:
++            if proc.stdin is not None:
++                try:
++                    proc.stdin.close()
++                except Exception:
++                    pass
++
++
+ def _try_init_sapi():
+-    global _sapi_proc
++    global _sapi_proc, _sapi_job
+     if subprocess is None:
+         return False
+-    try:
+-        CREATE_NO_WINDOW = 0x08000000
+-        _sapi_proc = subprocess.Popen(
+-            ['powershell', '-NoProfile', '-NonInteractive', '-Command', _sapi_script()],
+-            stdin=subprocess.PIPE,
+-            stdout=subprocess.DEVNULL,
+-            stderr=subprocess.DEVNULL,
+-            creationflags=CREATE_NO_WINDOW)
+-        return True
+-    except Exception as ex:
+-        log_line('SAPI backend init failed: {!r}'.format(ex))
+-        return False
++    with _sapi_lock:
++        if _sapi_proc is not None:
++            if _sapi_proc.poll() is None:
++                return True
++            _dispose_sapi_locked()
++        job = proc = None
++        try:
++            from tyjokr_a11y_speech_process import SpeechJob
++            job = SpeechJob()
++            proc = subprocess.Popen(
++                ['powershell', '-NoProfile', '-NonInteractive', '-Command', _sapi_script()],
++                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
++                stderr=subprocess.DEVNULL, creationflags=0x08000000,
++                close_fds=True)
++            job.assign(proc)
++            _sapi_proc, _sapi_job = proc, job
++            return True
++        except Exception as ex:
++            # Never retain an unowned helper if native ownership is refused.
++            _sapi_proc, _sapi_job = proc, job
++            _dispose_sapi_locked()
++            log_line('SAPI backend init failed: {!r}'.format(ex))
++            return False
+ 
+ 
+-def restart_sapi():
+-    """Apply changed sapi_* options: kill the child; the next utterance
+-    respawns it with fresh settings."""
+-    global _sapi_proc
+-    if _sapi_proc is not None:
++def _write_sapi(data, action):
++    with _sapi_lock:
++        proc = _sapi_proc
++    if proc is not None:
+         try:
+-            _sapi_proc.kill()
+-        except Exception:
+-            pass
+-        _sapi_proc = None
++            # Never hold the lifecycle lock during pipe I/O: restart/exit must
++            # still be able to kill a helper that is stuck before reading stdin.
++            proc.stdin.write(data)
++            proc.stdin.flush()
++        except Exception as ex:
++            log_line('SAPI {} failed: {!r}'.format(action, ex))
++
++
++def restart_sapi():
++    """Release and reap the owned child; the next utterance uses fresh options."""
++    with _sapi_lock:
++        _dispose_sapi_locked()
++
++
++if atexit is not None:
++    atexit.register(restart_sapi)
+ 
+ 
+ def list_voices():
+@@ -525,12 +575,7 @@ def stop():
+         except Exception as ex:
+             log_line('Prism stop failed: {!r}'.format(ex))
+     # Always cancel any fallback that may still be speaking after a switch.
+-    if _sapi_proc is not None:
+-        try:
+-            _sapi_proc.stdin.write(b'I\n')
+-            _sapi_proc.stdin.flush()
+-        except Exception as ex:
+-            log_line('SAPI stop failed: {!r}'.format(ex))
++    _write_sapi(b'I\n', 'stop')
+ 
+ 
+ def request_hush(grace=0.8):
+@@ -653,14 +698,10 @@ def _speak_now(text, source='tooltip'):
+             log_line('Prism output failed: {!r}'.format(ex))
+     if braille_mode == 'only':
+         return
+-    if _backend_name in ('prism', 'sapi') and _sapi_proc is None:
+-        # No available screen reader; use the configured Windows voice.
+-        _try_init_sapi()
+-    if _sapi_proc is not None:
+-        try:
+-            from urllib.parse import quote
+-            line = ('I' if interrupt else 'Q') + quote(text) + '\n'
+-            _sapi_proc.stdin.write(line.encode('ascii'))
+-            _sapi_proc.stdin.flush()
+-        except Exception as ex:
+-            log_line('SAPI speak failed: {!r}'.format(ex))
++    with _sapi_lock:
++        if _backend_name in ('prism', 'sapi') and _sapi_proc is None:
++            # No available screen reader; use the configured Windows voice.
++            _try_init_sapi()
++    from urllib.parse import quote
++    line = ('I' if interrupt else 'Q') + quote(text) + '\n'
++    _write_sapi(line.encode('ascii'), 'speak')
+diff --git a/Scripts/tyjokr_a11y_speech_process.py b/Scripts/tyjokr_a11y_speech_process.py
+new file mode 100644
+index 0000000..4bd7035
+--- /dev/null
++++ b/Scripts/tyjokr_a11y_speech_process.py
+@@ -0,0 +1,68 @@
++"""Own fallback speech children with a Windows kill-on-close Job Object.
++
++The kernel ends the child when its owner exits, including crashes. No named
++job or inheritable handle is used, so another program cannot keep it alive.
++"""
++import ctypes
++
++
++class _IO_COUNTERS(ctypes.Structure):
++    _fields_ = [(name, ctypes.c_ulonglong) for name in
++                ('ReadOperationCount', 'WriteOperationCount', 'OtherOperationCount',
++                 'ReadTransferCount', 'WriteTransferCount', 'OtherTransferCount')]
++
++
++class _BASIC_LIMITS(ctypes.Structure):
++    _fields_ = [('PerProcessUserTimeLimit', ctypes.c_longlong),
++                ('PerJobUserTimeLimit', ctypes.c_longlong),
++                ('LimitFlags', ctypes.c_uint32),
++                ('MinimumWorkingSetSize', ctypes.c_size_t),
++                ('MaximumWorkingSetSize', ctypes.c_size_t),
++                ('ActiveProcessLimit', ctypes.c_uint32),
++                ('Affinity', ctypes.c_size_t),
++                ('PriorityClass', ctypes.c_uint32),
++                ('SchedulingClass', ctypes.c_uint32)]
++
++
++class _EXTENDED_LIMITS(ctypes.Structure):
++    _fields_ = [('BasicLimitInformation', _BASIC_LIMITS),
++                ('IoInfo', _IO_COUNTERS),
++                ('ProcessMemoryLimit', ctypes.c_size_t),
++                ('JobMemoryLimit', ctypes.c_size_t),
++                ('PeakProcessMemoryUsed', ctypes.c_size_t),
++                ('PeakJobMemoryUsed', ctypes.c_size_t)]
++
++
++class SpeechJob:
++    def __init__(self):
++        self._handle = None
++        api = ctypes.WinDLL('kernel32', use_last_error=True)
++        api.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
++        api.CreateJobObjectW.restype = ctypes.c_void_p
++        api.SetInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int,
++                                               ctypes.c_void_p, ctypes.c_uint32]
++        api.SetInformationJobObject.restype = ctypes.c_int
++        api.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
++        api.AssignProcessToJobObject.restype = ctypes.c_int
++        api.CloseHandle.argtypes = [ctypes.c_void_p]
++        api.CloseHandle.restype = ctypes.c_int
++        self._api = api
++        handle = api.CreateJobObjectW(None, None)
++        if not handle:
++            raise ctypes.WinError(ctypes.get_last_error())
++        self._handle = handle
++        limits = _EXTENDED_LIMITS()
++        limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
++        if not api.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
++            error = ctypes.get_last_error()
++            self.close()
++            raise ctypes.WinError(error)
++
++    def assign(self, proc):
++        if not self._api.AssignProcessToJobObject(self._handle, ctypes.c_void_p(int(proc._handle))):
++            raise ctypes.WinError(ctypes.get_last_error())
++
++    def close(self):
++        handle, self._handle = self._handle, None
++        if handle is not None:
++            self._api.CloseHandle(handle)
 diff --git a/contrib-reference/docs/AUDIT-2026-11-01.md b/contrib-reference/docs/AUDIT-2026-11-01.md
 new file mode 100644
 index 0000000..5168fcf
@@ -5249,24 +5821,101 @@ index 0000000..5168fcf
 +This branch preserves contribution source for porting. It is not integrated into `Scripts`. Game testing and the upstream build gates remain required when each feature is ported. Ceiling/water anchors, mouse-driven roof/stair construction, and move restoration require game validation; this audit does not certify those paths as working.
 diff --git a/contrib-reference/docs/CHANGELOG.md b/contrib-reference/docs/CHANGELOG.md
 new file mode 100644
-index 0000000..682a052
+index 0000000..059a22f
 --- /dev/null
 +++ b/contrib-reference/docs/CHANGELOG.md
-@@ -0,0 +1,8 @@
-+# Changes
+@@ -0,0 +1,85 @@
++# Cumulative contribution changelog — 15 November 2026
 +
-+- Update to upstream adb868c (12 November): native contribution integration, wall-tool improvements, revised controls/settings and holiday announcements.
-+- Retire duplicate scanner, wall, layer, surface and settings adapters. Keep remaining local extensions behind one simulation-thread startup hook.
-+- Preserve attached-object cycling, focused-surface placement, chair hints and inferred/custom room names in the integrated modules.
-+- Expose scenario cards and native Play controls; read native descriptions, difficulty, requirements, roles and goals.
-+- Add native apartment-map selection and traverse nested rental-property region/building controls.
-+- Retain the house/roof/lot helpers, coordinate and floor fixes, cleaning/away actions, event-goal reader and earlier UI repairs.
++This test build combines upstream adb868c (12 November, game 1.129.39.1030) with the later contribution work below. It includes standard TS4 Access and the matching UI Cheats 1.59.1 compatibility package.
++
++## Earlier contribution, now integrated upstream
++
++Scanner distance/scope selection, furniture movement, wall-side and height support, room labels, placement layers, and experimental bare-ground/water/ceiling/fence placement are retained through the upstream implementation. Duplicate local adapters and their old polling/settings bootstrap have been retired. Remaining local extensions start once through the simulation-thread queue.
++
++## Build-grid targeting and furniture placement
++
++- Repeated number-row 1 presses cycle through supporting furniture and its attached contents separately, so a television can be selected independently of its stand.
++- Catalog placement uses the explicitly focused supporting surface. The same surface and a compatible free native slot are rechecked before registration and payment; full or incompatible surfaces refuse purchase.
++- Add experimental native snapping for dining chairs to dining tables and desk chairs to desks. Face an adjacent compatible table/desk or focus it with 1, then press Enter. Native slots supply the seat position and rotation.
++- Recheck the exact selected seat after the game releases its placement tool, and verify attachment before charging. A changed, occupied or invalid seat cancels the transaction.
++- Add independent settings for chair snapping and chair-to-table orientation hints; avoid duplicate hints when snapping already describes the target.
++- Preserve custom room labels ahead of inferred room names, with inferred names available through a passive room-name bridge.
++
++## House building, roofs and lot orientation
++
++- Combine the house presets and configurable stacked-house planner into one Build my house workflow, with square/rectangular layouts, room arrangements, aligned stories, room names/types and a plan review.
++- Add detached small-structure planning for sheds, garages, party houses and enclosed winter gardens, with footprint, layout, entrance side and naming choices.
++- Add an optional lot-planning description layer to the existing grid: detected buildings, rooms, pools, exterior flooring, landscaping, occupied ground and apparently clear outdoor ground.
++- Add building names and descriptions of detected footprints, floors, rooms, doors and windows; add room/build descriptions and door connections.
++- Add a roof assistant with flat-deck, gabled and hipped choices, detected building/room footprints and overhang presets. Flat mode describes the existing top-floor ceiling as the deck; it does not create a pitched roof piece.
++- Add roof-level descriptions, a chimney placement assistant and read-only stair-shape diagnostics.
++- Add an experimental basement adapter using the native Basement Tool, with room-result checks and its own setting and diagnostics.
++- Verify floor changes against native current/minimum/maximum floor data. Refresh cached lot floor ranges so new stories and basements are visible to room scans.
++- Isolate stair transitions to the active house plan and clear them when the plan ends, preventing failed plans from affecting later builds.
++
++## Resolution, scaling and build input
++
++- Replace the fixed/divided-screen coordinate assumption with measured native UI projection, live game-client dimensions, window origin and scoped Windows DPI conversion.
++- Check focus, native Build/dialog state, geometry changes and actual pointer arrival before helper clicks/drags. Abort on resize or focus changes and release helper-owned mouse/modifier state.
++- Add read-only display and build-coordinate diagnostics, including a11y.buildcoords, to record the measurements used for placement.
++
++## UI navigation and announcements
++
++- Port accessibility hooks onto the current 25 supported game UI movies and matching UI Cheats movies, retaining shared handlers and native controls.
++- Needs: use native trait-dependent need names, including occult variants, and omit invalid percentages. Skip empty temperament/curse cells.
++- Needs, Simology and Aspirations: traverse instantiated controls instead of repeatedly restarting one-cell section wrappers; omit linked decorative highlight artwork from focus stops.
++- Expose visible occult rank/points rows and individual ability controls to keyboard navigation.
++- Purchase pickers: keep focus on the item when confirmation is unavailable, announce native cart/funds reasons, and expose quantity controls. Preserve UI Cheats cart behavior.
++- Book-title/description dialogs: traverse row wrappers to the actual text inputs and existing confirmation footer.
++- Game Options: activate the native checkbox, dropdown or button inside each row; announce visible labels, values, descriptions and settled checkbox state. Improve Graphics option labels.
++- Social Bunny: expose visible post/contact actions, including message, friendship and reaction buttons, with author/post context.
++- Photography: add Photography controls to focus an already open camera and announce selected native filters.
++- Wedding planning: announce the native selected state of venue rows after activation.
++- Expose visible child actions inside clubs, Gallery subscription cards, rental-property cards and household cards.
++- Manage Worlds: expose neighborhood expansion, destination-household controls and native apartment-map unit selection. Traverse rental region/building wrappers and individual unit cards.
++- Main-menu scenarios: traverse groups/cards and native Play controls; announce rendered descriptions, difficulty, requirements, roles and goals through the existing startup speech transport.
++- Running events: add Current event goals under the selected event, focusing the native goal HUD; discard stale event/zone scopes.
++
++## Cleaning and household access
++
++- Add dirty and dusty scanner suffixes from current native object states, without changing scanner categories, ordering or refresh behavior.
++- Add read-only cleaning diagnostics to inspect native object states when a mess has an unhelpful name.
++- Add Floor actions here to open the native floor interaction menu at the active Sim's current position and floor, exposing available floor/vacuum actions.
++- Add native Away actions for eligible household Sims who are elsewhere, using the game's existing portrait action picker.
++
++## Speech helper lifetime
++
++- Own the Windows fallback PowerShell child with a native kill-on-close Job Object, so it terminates when its parent exits or crashes, including during stalled PowerShell startup.
++- Serialize startup and reuse the live child; restart closes ownership, waits for termination and closes stdin. Ownership/launch failure cleans up the candidate.
++- Keep pipe writes outside the lifecycle lock so a blocked write cannot prevent cleanup. Register normal-exit cleanup where available; kernel ownership also covers abrupt termination.
++- Bound the separate optional setup-helper PowerShell startup check to five seconds, with an explicit skip when unavailable; actual helper test failures remain failures.
++
++## Further native UI audit — 15 November
++
++- Restaurant menus: retain readable course headings and expose individual dishes and existing Remove controls on menu items.
++- Clubs and business rules: retain each native add/edit row and expose its visible Remove button.
++- Small-business employees: expose salary/fire controls with employee-name context.
++- Restaurant/vet settings: reach real buttons inside warning wrappers; announce the native label beside management dropdowns and employee outfit controls.
++- Jewelry crafting: stop reading hidden material-selection prompts or stale selected-material text alongside the current state.
++- Audit twelve additional screen families; record specific deferred restaurant-order, collection-tooltip and status-reading work separately for later testing.
++
++## UI Cheats focused right-click support
++
++- Add an explicit right-click action for focused UI controls; no shortcut is assigned yet.
++- Use existing attached cheat extensions and correct need-bar hit coordinates. Dispatch one native right-button click, with no left-click/down/up fallback or duplicate bar/container delivery.
++- Refuse stale, hidden, disabled, out-of-scope or invalid targets, text entry and pending navigation. Queue the action through the existing input-epoch fence.
++- Preserve UI Cheats' own dialogs/actions and add sent/blocked diagnostics. World/scanner object controls are unchanged.
++
++## Validation
++
++The latest run has 134 passing suites, zero failed suites and one optional setup-helper suite skipped; source inputs remained stable. Eighteen additional native-UI checks and 33 right-click/queue checks pass. Ten speech-lifecycle tests include real Windows normal-parent-exit and forced-parent-termination checks, plus blocked-pipe cleanup. All 43 existing speech-mode checks also passed against the compiled script. UI fidelity, structure and shared-handler evidence accompany both matching rebuilt UI packages. Added or repaired game UI/build flows still require in-game testing; this changelog records implemented behavior, not a claim that every flow has been confirmed live.
 diff --git a/contrib-reference/docs/CONTROLS-AND-TESTING.md b/contrib-reference/docs/CONTROLS-AND-TESTING.md
 new file mode 100644
-index 0000000..e893361
+index 0000000..f169ae3
 --- /dev/null
 +++ b/contrib-reference/docs/CONTROLS-AND-TESTING.md
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,83 @@
 +# Contribution controls and testing
 +
 +## Build Helper
@@ -5346,12 +5995,16 @@ index 0000000..e893361
 +The source, bytecode, plan geometry and archive structure were verified outside the game. The Sims 4 performs the final room, door, stair, roof and object placement through its Build UI. Those workers move or drag the game cursor, then inspect the resulting game state and stop when the result differs from the requested geometry. Testing in-game confirms that camera projection, catalog selection and the current game patch allow those mouse-driven actions on the test lot.
 +
 +If something fails, leave logging enabled, reproduce it once, and keep the TS4 Access log. Relevant contribution lines begin with `contrib:`, `wall:`, `room bridge:`, `surfaces:`, `layers:`, `roof tools:`, `house planner:`, `lot grid:`, `detached builder:`, or `chair alignment:`.
++
++## Native chair snapping (experimental)
++
++Choose a dining or desk chair. Face the adjacent table/desk from the Build cursor, or focus that table/desk with number 1 on the ground layer. Enter uses the closest game-validated native chair slot. The preview identifies the table and seat location; native slot rotation applies automatically. Full or invalid seats refuse purchase. The separate **experimental chair snapping** setting can disable this path while retaining orientation hints.
 diff --git a/contrib-reference/docs/DEVELOPER-MANIFEST.md b/contrib-reference/docs/DEVELOPER-MANIFEST.md
 new file mode 100644
-index 0000000..b69f888
+index 0000000..80785d6
 --- /dev/null
 +++ b/contrib-reference/docs/DEVELOPER-MANIFEST.md
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,19 @@
 +# Developer manifest
 +
 +Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
@@ -5363,12 +6016,20 @@ index 0000000..b69f888
 +- flash/TooltipManager_patched.as: scenario group/card traversal and narration; native apartment-marker focus/activation; rental region/building traversal. Earlier local UI repairs are retained.
 +- flash/extra-classes/PlexLotSelectOverlay.as: two helpers map the exact native clip to its lot data and call the existing validated selection handler. rebuild_all.ps1 adds this class to the existing GameEntryDock movie.
 +- Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.
++
++- Native chair snapping: Scripts/tyjokr_a11y_chair_snap.py selects and revalidates native seat slots; grid.py (_fit_parts, _build_place) dispatches preview/placement; place.py (place, _finish, _after_payment) verifies attachment before payment. settings.py/menu.py expose the independent experimental toggle. chair_alignment.py suppresses duplicate hints. tools/test_chair_snapping.py covers 23 transaction and targeting cases.
++
++- Speech lifecycle: Scripts/tyjokr_a11y_speech_process.py (SpeechJob) owns the child with KILL_ON_JOB_CLOSE. speech.py (_try_init_sapi, _dispose_sapi_locked, restart_sapi, stop, _speak_now) serializes ownership, reaps/closes on restart and registers exit cleanup. Ten lifecycle tests include real Windows parent exit/crash.
++
++- Proactive native UI: TooltipManager_patched.as, A11yCollectFocusables (compound-row actions), A11yCompositeRow (restaurant courses/warning wrappers), A11yOptionsRowLabel (native business labels/employee context), A11yTextDecoration (jewelry visibility branches). Eighteen fixtures: tools/test_proactive_ui_native.js. Native audit: docs/development/audits/proactive-ui-20261115.md.
++
++- Unbound right-click: TooltipManager_patched.as, A11yRightClickOwner/A11yTryRightClick/A11yMsgRightClick plus one native message listener. keys.py _send adds A11yRightClick to the existing activation-epoch fence; no key is bound. Native event and queue tests: test_ui_rightclick.js/test_ui_rightclick_queue.py.
 diff --git a/contrib-reference/modules/tyjokr_a11y_chair_alignment.py b/contrib-reference/modules/tyjokr_a11y_chair_alignment.py
 new file mode 100644
-index 0000000..3960c6c
+index 0000000..c4e7aa8
 --- /dev/null
 +++ b/contrib-reference/modules/tyjokr_a11y_chair_alignment.py
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,163 @@
 +"""Optional Build-grid orientation hints for dining and desk chairs.
 +
 +This module only augments announcements. It never moves, rotates, validates,
@@ -5481,6 +6142,8 @@ index 0000000..3960c6c
 +    if selected is None:
 +        return []
 +    item, details = selected
++    import tyjokr_a11y_chair_snap as chair_snap
++    if chair_snap.has_target(item,frame):return []
 +    chair_label, target_tag, target_label = details
 +    i, j = grid._tile
 +    target = _nearest_target(frame, i, j, grid._level, target_tag)
@@ -6581,125 +7244,40 @@ index 0000000..0210f80
 +    except Exception as ex: _log("install failed: {!r}".format(ex))
 +
 +install()
-diff --git a/docs/development/UI-PORT-1.129.md b/docs/development/UI-PORT-1.129.md
+diff --git a/docs/development/audits/proactive-ui-20261115.md b/docs/development/audits/proactive-ui-20261115.md
 new file mode 100644
-index 0000000..c8e0226
+index 0000000..3175fe0
 --- /dev/null
-+++ b/docs/development/UI-PORT-1.129.md
-@@ -0,0 +1,82 @@
-+# UI port: game 1.129.39.1030
++++ b/docs/development/audits/proactive-ui-20261115.md
+@@ -0,0 +1,28 @@
++# Proactive native UI audit — 15 November 2026
 +
-+Current EA UI SHA256: `6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83`.
-+The 1.128 reference snapshot remains unchanged. Work in progress; no new package deployed.
-+Local extracted inputs and complete-package class ownership: `build/transfer-audit/current-inputs.json`.
-+Current-source exports and diffs: `build/ui-port/current-sources/` (not distributable).
++Game baseline: 1.129.39.1030. Native movies were read from the installed UI.package and exported read-only. Twelve additional screen families were inventoried; relevant native fields, Draw visibility branches and event owners were compared with the production accessibility walker. No game interactions were performed.
 +
-+## Movie progress
-+
-+All 25 current-game inputs were checked against the installed UI, targeted native classes compared, existing hooks retained, and movies rebuilt serially. The full fidelity gate passed 62 targeted-class comparisons. Exact non-code tags and class sets are preserved in every movie. Runtime testing remains separate.
-+
-+| Movie | Native port / compile / offline gate |
++| Native movie | Result |
 +| --- | --- |
-+| SimInfoMotivePanel | Pass |
-+| SimInfoTray | Pass |
-+| ClassLibraryGamedata | Pass |
-+| PickersPurchase | Pass |
-+| Pickers | Pass |
-+| Dialog | Pass |
-+| UIContainer | Pass |
-+| AgeUpPanel | Pass |
-+| BaseLibrary | Pass |
-+| ClassLibraryOlympus | Pass |
-+| ClassLibraryScaleform | Pass |
-+| ClassLibraryWidgetsShared | Pass |
-+| ComponentLibrary | Pass |
-+| GUIComponentLibrary | Pass |
-+| GameEntryDock | Pass |
-+| GameEntryLauncher | Pass |
-+| GameEntryLibrary | Pass |
-+| GameTray | Pass |
-+| HUDLibrary | Pass |
-+| InteractionQueue | Pass |
-+| Notifications | Pass |
-+| ObjectBoundElements | Pass |
-+| PieMenu | Pass |
-+| SimHub | Pass |
-+| TimeControls | Pass |
++| RestaurantMenu | Fix CourseCellView swallowing its nested dish grid; retain its heading as a separate read-only stop and FoodCellView swallowing its visible Remove action. Keep native order/edit modes and disabled checks. |
++| SmallBusinessEmployeeManagement | Fix populated employee rows swallowing salary/fire controls. Read the public mcContent display container, not protected aliases; retain employee-name context for each action. |
++| SmallBusinessConfigurator | Fix shared RuleCellView swallowing its native Remove action. Native hover still owns whether Remove is visible. |
++| ClubDetails | Fix ClubRulesCellView swallowing its native Remove action. Keep the row's original add/edit action. |
++| ClubRules | Same reviewed shared ClubRulesCellView behavior; no new movie override. |
++| BusinessSettings | Fix inert ButtonWarningContainer/GenericTextButtonWarningContainer stopping traversal before the real inner button. Read exact native sibling labels for management dropdowns and employee outfits. |
++| JewelryCrafting | Fix hidden mcLabels/mcContent branches contributing stale prompts or old material text to immediate row reads. Respect the native selected/empty/not-needed branches. |
++| ClubRewards | Existing TextField visibility already suppresses hidden prices. Retain regression coverage; no change to reward purchasing or availability. |
++| CollectionDisplay | Category progress already uses localized visible text; no demonstrated safe change in this pass. See follow-up below for icon-only data. |
++| CareerSelector | Existing choice-description reader supplies the career row's native description. No new activation or selection change. |
++| Calendar | Existing native Add proxies and informational schedule traversal cover the inspected action owners. No new change. |
++| SimInfoRelationshipPanel | Inventoried native filter, track and relationship cells. No demonstrated scoped fix without a focused live case. |
 +
-+Regression suite including the purchase follow-up: **passed**, **input_stable true**, 1,497 reported checks across 111 isolated suites (includes repeated imported checks). Static message inventory: 35 registered messages, no missing handler methods, no unmatched literal Flash speech commands; Repeat and SpeechMode are Python-local controls.
++## Deferred follow-up with concrete next steps
 +
-+Handler audit: 39 routing/activation methods match the Git base source and have matching normalized instructions, jump destinations and exception ranges across all 29 patched TooltipManager copies. Game Python modules and contribution modules match the Git base. The updated purchase-footer helper was separately verified in all 29 copies. The nine-case scanner pick bridge fixture exercises encoded picks through `A11yOpenPieMenu` to `interactions.choices`, including large IDs, Sim picks, native-message forwarding, mode changes and request-ID rollover. The current native EA pie menu retains the same 14-argument interaction request layout.
++- Restaurant per-Sim Remove Food/Drink: SimGridCellView stores protected button aliases under public mcFood/mcDrink clips. Native indicator rollover reveals the corresponding button. A later isolated adapter should provide distinguishable indicator labels, preserve the order's locked state and verify synthetic hover/exit behavior. Do not force visibility or dispatch private removal methods.
++- Collections: CollectionItemCellView uses a native tooltip data object rather than visible title text. Check whether fast keyboard traversal cancels that tooltip before reading it; if confirmed, add a class-specific read-only data label with found/missing state from the native tooltip fields.
++- Relationship bars and reward eligibility: require native localized status/tooltip evidence before adding interpretations of icon/timeline state. Existing selection and purchase controls remain authoritative.
 +
-+Compatibility: six current UI Cheats inputs compared and rebuilt; fidelity gate passed 19 targeted-class comparisons. Exact non-code tags and class sets are preserved in all six.
++## Checks
 +
-+## Changes
-+
-+Purchase follow-up: the log's Romantic Items cart remained at count/cost zero while Enter moved from the Sweetheart's Box row to disabled Done. Current EA `PurchasePicker.CheckCost` requires a nonempty cart and sufficient funds. `A11yPickerFooter` now retains row focus when Done is disabled, reads its native funds reason or the native empty-cart text, and announces Left/Right quantity controls. Native quantity, affordability and confirmation actions are preserved. Its nine-case fixture covers empty carts, funds, enabled confirmation, teardown, recipe Next, the quantity-to-confirmation sequence and game-disabled increases. The diagnostic marker is `purchase-footer-disabled`. Fresh full rebuild/gate reports are under `build/purchase-fix/`.
-+
-+- `flash/extra-classes/CommodityContainer.as`, `A11yMotiveText`: use EA's trait-dependent `GetCommodityName(AllTraitIds)` like the displayed title. Clamp percentages and omit invalid numeric values. Existing speech channel retained.
-+- `tools/ui_port_inventory.py`: verify all 25 inputs against the installed UI and find actual class definitions across the complete package.
-+- `tools/ui_port_sources.py`: export targeted source one movie at a time and retain diffs for manual review.
-+- `tools/test_occult_motive_text.js`: exercise actual narration method with trait-dependent names, normal/range limits and invalid values.
-+- `flash/TooltipManager_patched.as`, `A11yInformational`: expose the native occult rank/points rows while retaining their powers button. `A11yCompositeRow`: traverse native perk-rank and transfer-neighborhood wrappers to reach their actual buttons and visible nested choices. No new message or purchase service introduced.
-+- `flash/extra-classes/DialogMain.as`, `HandleShowSavingDialog`: retain current EA `allowDuringLoading` behavior during the port.
-+- `flash/prepare_uicheats_purchase.py` and `build_uicheats_compat.ps1`: generate a compatibility-only cart cell preserving UI Cheats v1.59.1 right-click ten-item quantity changes and the shared narration hooks. `-BaseDir` accepts isolated reviewed inputs; the compatibility gate accepts the same path through `TS4_UICHEATS_BASE`.
-+- `tools/ui_bridge_inventory.py`: record registered messages, handler methods, speech commands and local Python speech controls.
-+- `tools/ui_port_verify.py`: compare class sets and exact non-code tags across the complete rebuild.
-+- `tools/ui_port_handler_audit.py` and `tools/test_scanner_pick_bridge.js`: compiled handler parity and scanner-to-pie callback regression protection. Pcode normalization removes debug metadata and private script numbering, and maps byte offsets to instruction positions while preserving branches and exception ranges.
-+
-+## Narrow follow-up investigations
-+
-+- Simology rank/powers controls and PerksPanel are outside the 25 shipped movies. Prefer safe shared-manager traversal using native buttons; do not introduce whole-movie overrides without separately reviewing their risk and UI Cheats overlap.
-+- Current `MotivePanelRankedStatContent` uses `GetDataByOccultType` for the needs-panel occult rank/powers section. `SummaryPanelRankedStatContent.Setup` uses ghost-powers data in Simology. The shared-manager additions follow those existing sections rather than inventing a second werewolf abilities menu in Simology.
-+- EngagementLibrary was previously associated with a freeze when opening Gallery; it is not evidence of Gallery ownership. Current class definitions place Gallery details/filters in ExchangeDetail/ExchangeLibrary. Do not re-enable the EngagementLibrary override.
-+- Current Gallery details are in `ExchangeDetail`: `DetailInfoCellView.mcDescriptionInfo` and `txtDescriptionEdit.CurrentText` expose descriptions. `SetupDescriptionInfo` switches editability, so a read-only description stop must avoid entering editing mode. The generic collector caps a row at 24 text entries; test whether metadata crowds out the description before changing it. Native ExchangeDetail export reports unresolved PlaceObject3 tags: retain the original movie.
-+- Current Gallery filters are in `ExchangeLibrary`: `FilterOptionsGroup` exposes `txtLabel`, `txtContextInfo`, `mcGridView`, and `btnExpand`; `GalleryFilterCheckboxButton` has native checkbox state. A focused follow-up should add group context without repeating checkbox text or disturbing collapsed/locked filters.
-+- TimeControlsMain is defined in SimHub and TimeControls. Compare both native bodies before choosing a patch strategy.
-+- Alt+N uses a fixed six-need Python list. Do not guess occult stat IDs or treat all meters as “low is bad”; prefer current UI data and game tuning.
-+- Manage Worlds transfer-neighborhood wrapper traversal is fixed in source; nested grid/native selection-event behavior still requires in-game testing. Successful transfers in earlier logs do not establish all routes work.
-+- Standard and UI Cheats compatibility targets confirmed. Publish to the fork and Downloads only; do not replace installed game files. Current UI Cheats v1.59.1 replaced-class differences were reviewed: clock attachment and right-click cart quantity handling are preserved.
-+- Existing four contribution fixture scripts printed uncounted success messages; their summaries now report one scenario each so the full runner can recognize them. No assertions changed. Build the helper executable before the complete suite, as required by the developer build instructions.
-+
-+## Release requirements
-+
-+The complete offline suite, literal bridge inventory, standard/compatibility fidelity gates and movie structure checks passed. Package identity checks follow assembly. The checkout has no `.handoff/baseline.json`, so `Dev.ps1 return` cannot create its old-format archive; the review patch is anchored to Git base `d7c59d5` instead. The old immutable baseline is not regenerated.
-+
-+Live tests must cover occult needs/abilities, book cart navigation/purchase, Gallery filters/descriptions, Manage Worlds transfers, scanner Enter/pie menus and CAS entry. No automated test should spend points or buy items without explicit action. Deferred Gallery changes and duplicate TimeControlsMain ownership remain separate follow-ups.
-+
-+## Info-panel navigation follow-up
-+
-+Needs, Simology and Aspirations now walk their fully instantiated controls directly, retaining native slider reveal. This avoids re-entering one-cell content wrappers or nested trait/goal grids. Empty temperament/curse slots use EA's IsEmpty getter; linked controller-highlight artwork is excluded from narration and focus. Code: TooltipManager.A11yFindScrollList, A11yKeyboardDecoration and A11yTextDecoration. Tests cover forward/backward traversal, later sections, independent pickers and decorative-control isolation. See changes/info-panel-navigation.md. In-game verification of this follow-up remains pending.
-diff --git a/docs/development/audits/chair-snapping-20261113.md b/docs/development/audits/chair-snapping-20261113.md
-new file mode 100644
-index 0000000..583741e
---- /dev/null
-+++ b/docs/development/audits/chair-snapping-20261113.md
-@@ -0,0 +1,5 @@
-+# Chair snapping audit
-+
-+Current chair_alignment adds direction hints only. Grid floor placement checks fit; it does not verify a usable chair/table pair. Explicit focused-surface placement accepts only native compatible empty runtime slots, but chair snapping through that path is not established.
-+
-+The installed Python exposes RestaurantZoneDirector.get_dining_table_by_chair, a read-only restaurant seating lookup, not a general Build placement operation. A dedicated chair assistant still needs a verified native placement path and post-placement seating-link checks. No chair-snapping behavior is added in this update.
-diff --git a/docs/development/audits/requested-ui-2026-11-09.md b/docs/development/audits/requested-ui-2026-11-09.md
-new file mode 100644
-index 0000000..1ca15ca
---- /dev/null
-+++ b/docs/development/audits/requested-ui-2026-11-09.md
-@@ -0,0 +1,14 @@
-+# Requested screens and proactive navigation fixes
-+
-+Game 1.129.39.1030; native UI SHA256 6807e477012eca956ee8ef744c00917d4f983547826a0af5c741391e94d0ac83.
-+
-+| Screen | Change | Evidence |
-+| --- | --- | --- |
-+| Social Bunny | Keep readable posts/contacts and expose visible native message, remove, friend and reaction buttons with author/post context. | Native class inspection and production-method fixtures, including nested direct messages. |
-+| Running event goals | Events → selected event → Current event goals focuses its native goal HUD; stale event/zone scopes expire. | Native SituationDisplay identifiers and public panel method; identity, modal and cleanup fixtures. |
-+| Book-style text dialogs | Traverse native title/description row wrappers to their real input fields and existing footer. | Native TextInputCellView/InlineTextInputCellView and field/footer fixture. Native validation is retained. |
-+| Photography | Panels → Photography controls focuses an already open camera; native selected filters are announced. | Native SimCamera controls, selected-state and modal/closed-camera fixtures. |
-+| Wedding venue | Announce native selected state after activation. | Native LocationCellView.Selected and settled-readback checks. Selection failure itself is not established from static inspection. |
-+| Clubs, Gallery subscriptions, rental units, household cards | Expose visible native child actions hidden behind readable card wrappers. | Exact native class/field inspection and one fixture for each family. |
-+
-+No game interactions were performed by these checks. In-game confirmation remains required for the reported book, photography and wedding scenarios. Unrelated screens retain the existing traversal. All shared TooltipManager definitions are rebuilt together for standard and UI Cheats packages.
++Eighteen new source-executing fixtures exercise the four changed production methods and native click guards. Replaying them against the previous committed TooltipManager reproduces twelve failures; six unaffected/guard cases already pass. All eighteen pass with the candidate. Full regression and compiled-package outcomes are recorded in the candidate's VALIDATION and UI evidence files. In-game testing remains pending.
 diff --git a/docs/development/changes/away-actions.md b/docs/development/changes/away-actions.md
 new file mode 100644
 index 0000000..7c8c3c3
@@ -6744,6 +7322,19 @@ index 0000000..ccb182a
 +- `tools/test_build_helpers.py`: key ownership/acknowledgement, multiple floors, abort/release paths, unchanged floor, invalid input and late menu wrappers.
 +
 +Live evidence: 2026-11-09 23:22, the game verified all five ground-floor room footprints. The three upper-floor attempts were intercepted as Build-grid floor-up commands; native construction stopped with incomplete second-floor rooms. The new adapter addresses input ownership; in-game verification pending.
+diff --git a/docs/development/changes/chair-snapping.md b/docs/development/changes/chair-snapping.md
+new file mode 100644
+index 0000000..81fbf27
+--- /dev/null
++++ b/docs/development/changes/chair-snapping.md
+@@ -0,0 +1,7 @@
++# Native chair snapping
++
++Adds tyjokr_a11y_chair_snap.py as a plain-function module called by the existing grid and placement transaction. Dining and desk chairs can snap when facing an adjacent compatible table/desk, or when that table/desk is explicitly focused with number 1. The native slot supplies position and rotation; ambiguous table choices require focus.
++
++A definition-only native check previews the exact seat. After the normal tool-drop acknowledgement, the actual chair must pass the same slot's native placement check. Slot attachment is read back before and after registration, and payment follows those checks. Ordinary placement, surface-object placement, and the separate orientation-hint preference keep their existing paths. No keyboard thread, runtime helper replacement or Flash change is added. A separate experimental chair-snapping flag is persisted in the native settings schema.
++
++Tests exercise the real grid entry point and placement/payment implementation with native stand-ins. Live confirmation is pending.
 diff --git a/docs/development/changes/cleaning-diagnostic.md b/docs/development/changes/cleaning-diagnostic.md
 new file mode 100644
 index 0000000..60b789f
@@ -6896,6 +7487,52 @@ index 0000000..588606a
 +In-game test: Enter on Auto Age opens its choices; arrows then Enter choose a value. Enter/Space on a checkbox toggles and reads its state. Apply Changes saves normally. Check Gameplay, Pack Settings and a neighbouring Audio/Graphics option; verify scanner Enter after closing Options. In-game results are recorded separately from offline checks.
 +
 +Rollback: restore the paired previous UI packages, or reverse the source patch. No script change.
+diff --git a/docs/development/changes/prelaunch-test-startup.md b/docs/development/changes/prelaunch-test-startup.md
+new file mode 100644
+index 0000000..ed9e97e
+--- /dev/null
++++ b/docs/development/changes/prelaunch-test-startup.md
+@@ -0,0 +1,5 @@
++# Optional setup-helper test startup
++
++The setup helper re-enables mods in Options.ini before game launch; it is not required by the running mod. Windows PowerShell on this machine also hangs on a print-only command, before the helper is loaded.
++
++The Python launcher now probes startup for at most five seconds. Missing or unresponsive PowerShell reports an explicit optional-test skip (77), not a mod failure or a pass. Once PowerShell starts successfully, helper test failures and timeouts remain failures. The full report lists skipped and failed suites separately and does not mark incomplete coverage as fully passed. Six isolated launcher tests cover these outcomes. No helper behavior or installed game files changed.
+diff --git a/docs/development/changes/proactive-ui-native.md b/docs/development/changes/proactive-ui-native.md
+new file mode 100644
+index 0000000..d8f4403
+--- /dev/null
++++ b/docs/development/changes/proactive-ui-native.md
+@@ -0,0 +1,7 @@
++# Proactive native UI navigation
++
++- Restaurant course wrappers retain a read-only heading and expose the existing dish grid; food, club-rule and shared-rule rows retain their summary/action and expose native visible Remove controls.
++- Small-business employee rows expose salary/fire through public mcContent, with employee-name context. Business warning wrappers expose their real inner button. Management/outfit controls read their exact native sibling labels.
++- Jewelry material rows omit explicitly hidden selected/empty/not-needed branches from immediate row narration.
++
++Code: flash/TooltipManager_patched.as, A11yCollectFocusables (around 5205), A11yCompositeRow (6876), A11yOptionsRowLabel (6471) and A11yTextDecoration (6760). No Python command, keyboard binding, native event handler or movie list changes. Eighteen source-executing fixtures in tools/test_proactive_ui_native.js include visibility, identity, disabled actions and unrelated-control isolation. Native findings and deferred cases: docs/development/audits/proactive-ui-20261115.md.
+diff --git a/docs/development/changes/proactive-ui-test-cases.md b/docs/development/changes/proactive-ui-test-cases.md
+new file mode 100644
+index 0000000..2fc91bc
+--- /dev/null
++++ b/docs/development/changes/proactive-ui-test-cases.md
+@@ -0,0 +1,16 @@
++# Native UI test cases — 15 November
++
++Use a disposable/backed-up save with the relevant packs. These are manual cases; this audit did not interact with the game.
++
++1. Restaurant menu: use Tab and arrows through courses and individual dishes. In menu editing, focus a dish then its visible Remove button. In ordering mode, confirm the existing native choice/confirmation flow still owns the action.
++2. Clubs/rules: focus an editable activity or admission-rule row, then its Remove control. Read-only/non-editable rows must not gain a forced Remove action. Cancel or use a disposable rule when testing deletion.
++3. Small-business employees: reach a populated employee row, then salary and fire. Each child action should include that employee's name. Opening salary should show the native picker; fire should retain the native confirmation. Cancel both when only checking access.
++4. Restaurant/vet settings: focus menu/warning button wrappers and verify the working inner control is selected. Management dropdowns and employee outfits should include their adjacent localized label as well as their current value/tooltip.
++5. Jewelry: compare an empty material slot, selected metal/crystal/design and a native not-needed crystal state. Selected rows should read the current name/price without the hidden empty-slot instructions; empty rows should not read the previous material.
++6. Neighbor checks: existing Game Options, scanner Enter, ordinary purchase picker, Social Bunny actions, apartment/scenario navigation and occult panel traversal should keep their previous behavior.
++
++Compiler gates and display-tree fixtures cannot establish live selection, focus timing or tooltip timing. Record the UI package hashes and a short focused log with any failed case.
++
++## Unbound right-click action
++
++No shortcut is assigned yet. A developer can request A11yRightClick through tyjokr_a11y_keys._send after normal UI focus has settled. On a need bar, expect the native Set Motive dialog; on the currency control, expect the native money dialog. Cancel without entering values for a read-only smoke check. Verify one dialog/action only and compare right-click|sent coordinates in a short diagnostic log. Native milestone/buff/goal right-click actions may act immediately, so test those only in a disposable save. Verify missing UI Cheats, hidden/stale controls, text entry and pending navigation refuse. This action targets UI controls, not scanner/world objects.
 diff --git a/docs/development/changes/scanner-cleanliness.md b/docs/development/changes/scanner-cleanliness.md
 new file mode 100644
 index 0000000..da19f56
@@ -6913,6 +7550,17 @@ index 0000000..da19f56
 +Live check: hear the dirty toilet in the scanner; clean it normally, then repeat its announcement and verify the suffix clears. Verify a clean sink remains unlabelled and the dusty desk says dusty. In-game speech/cleaning transition confirmation remains pending.
 +
 +Rollback: restore the previous script archive, or reverse the patch and remove the cleanliness module.
+diff --git a/docs/development/changes/speech-child-lifecycle.md b/docs/development/changes/speech-child-lifecycle.md
+new file mode 100644
+index 0000000..10c9ad2
+--- /dev/null
++++ b/docs/development/changes/speech-child-lifecycle.md
+@@ -0,0 +1,5 @@
++# Speech helper lifecycle
++
++Windows fallback speech now owns its PowerShell child through an unnamed, non-inheritable kill-on-close Windows Job Object. Parent exit/crash releases the job even if PowerShell never reaches its stdin loop. Startup is serialized; repeated initialization reuses the existing live child. Restart closes the job, waits for termination and closes stdin. Ownership/launch failure tears down the candidate instead of retaining an unowned helper. Speech writes take a synchronized process snapshot, then release the lock before pipe I/O so a blocked pipe cannot prevent restart or exit cleanup.
++
++Code: Scripts/tyjokr_a11y_speech_process.py (SpeechJob); Scripts/tyjokr_a11y_speech.py (_try_init_sapi, _dispose_sapi_locked, restart_sapi, stop, _speak_now). Tests: tools/test_speech_process_lifecycle.py. Ten cases passed, including actual Windows normal-parent-exit and forced-parent-termination tests with harmless sleeping children. Existing 43 speech-mode checks passed. Live in-game fallback voice remains to be tested.
 diff --git a/docs/development/changes/ui-port-1.129.md b/docs/development/changes/ui-port-1.129.md
 new file mode 100644
 index 0000000..7d962a6
@@ -6931,6 +7579,23 @@ index 0000000..7d962a6
 +Code locations: `CommodityContainer.A11yMotiveText`; `TooltipManager.A11yInformational` and `A11yCompositeRow`; `DialogMain.HandleShowSavingDialog`; compatibility cart preparation in `flash/prepare_uicheats_purchase.py` and `build_uicheats_compat.ps1`.
 +
 +Detailed validation and deferred Gallery work are tracked in `docs/development/UI-PORT-1.129.md`. In-game verification remains required.
+diff --git a/docs/development/changes/ui-rightclick.md b/docs/development/changes/ui-rightclick.md
+new file mode 100644
+index 0000000..1d4ed80
+--- /dev/null
++++ b/docs/development/changes/ui-rightclick.md
+@@ -0,0 +1,11 @@
++# Unbound focused UI right-click
++
++Add A11yRightClick to the existing native UI-message listeners, with three isolated TooltipManager methods: A11yRightClickOwner, A11yTryRightClick and A11yMsgRightClick. No key binding or automatic invocation is added. A future binding can use tyjokr_a11y_keys._send('A11yRightClick'); the action now uses the same input-epoch fence as Enter/Toggle. Startup navigation remains unsupported for this live-UI action.
++
++The handler requires the UI Cheats-only GenericCheatsExtension class (absent from all 258 scanned native movies), an already attached compatible extension, live owned focus, current keyboard lease, no text editing or pending navigation, native enabled/mouse-enabled state, and a valid on-stage hit point. GetExtension(Class,false) never creates an extension. Need bars use the existing extension's mcProgressBar and native ID. One non-bubbling MouseEventEx CLICK, marked RIGHT_BUTTON, is sent to the native listener owner at the correct local coordinates; no down/up/left fallback is sent. Currency and milestone Setup-based extensions use the nearest existing click-listener child within the extension owner; dispatch does not bubble to a broader category/panel. Native UI Cheats handles its own dialog or action. No cheat commands, confirmation buttons or game values are invoked directly by this adapter.
++
++Native evidence: UI Cheats 1.59.1 Generic/ProgressBar/Buff/Goal and other extensions listen to MouseEvent.CLICK and InputUtils.IsRightMouseButton; ProgressBarCheatExtension also hit-tests stage coordinates. Native ExtendableComponent.GetExtension takes a second create-if-missing flag. The click stays on one owner to avoid double delivery through bar and container listeners. Existing UI Cheats actions can themselves act immediately (for example buff removal); this adapter preserves that behavior after an explicit request.
++
++Logs: right-click|sent records the native owner class and delivered stage coordinates; right-click|blocked records refusal. No shortcut is assigned yet. This targets focused UI controls, not world/scanner objects. Standard-game operation without the UI Cheats class refuses safely. Live-game confirmation of delivered events is pending.
++
++Tests: tools/test_ui_rightclick.js (30 native-shaped fixtures); tools/test_ui_rightclick_queue.py (three queued-input cases). Compiled UI gates and the cumulative package validation are recorded separately.
 diff --git a/docs/development/changes/unified-house-workflow.md b/docs/development/changes/unified-house-workflow.md
 new file mode 100644
 index 0000000..51ce8b6
@@ -6960,7 +7625,7 @@ index 0000000..fa17355
 +
 +Game inputs remain 1.129.39.1030 and UI Cheats 1.59.1. No new movie is overridden; GameEntryDock gains its native overlay class as one targeted replacement. Full movie and shared-handler gates apply. Live selection, scenario start and placement confirmation remain pending user testing.
 diff --git a/flash/TooltipManager_patched.as b/flash/TooltipManager_patched.as
-index c76497c..93e6a9d 100644
+index c76497c..1c07293 100644
 --- a/flash/TooltipManager_patched.as
 +++ b/flash/TooltipManager_patched.as
 @@ -1,417 +1,508 @@
@@ -7885,7 +8550,7 @@ index c76497c..93e6a9d 100644
              else
              {
                 // Which condition refused, for the log (2026-10-16: a wall
-@@ -421,7847 +512,8275 @@ package olympus.core
+@@ -421,7847 +512,8453 @@ package olympus.core
                    " blocked=" + this.A11yBuildBlocked() + " tool=" + this.A11yBuildToolAllowed() +
                    " top=" + getQualifiedClassName(this.A11yTopModalWidget()));
              }
@@ -19791,6 +20456,7 @@ index c76497c..93e6a9d 100644
 +            CommunicationManager.AddMessageListenerByName("A11yNavNext",this.A11yMsgNext,"A11yNarrator");
 +            CommunicationManager.AddMessageListenerByName("A11yNavPrev",this.A11yMsgPrev,"A11yNarrator");
 +            CommunicationManager.AddMessageListenerByName("A11yActivate",this.A11yMsgActivate,"A11yNarrator");
++            CommunicationManager.AddMessageListenerByName("A11yRightClick",this.A11yMsgRightClick,"A11yNarrator");
 +            CommunicationManager.AddMessageListenerByName("A11yClearFocus",this.A11yMsgClear,"A11yNarrator");
 +            CommunicationManager.AddMessageListenerByName("A11yAutoFocusOn",this.A11yMsgAutoFocusOn,"A11yNarrator");
 +            CommunicationManager.AddMessageListenerByName("A11yAutoFocusOff",this.A11yMsgAutoFocusOff,"A11yNarrator");
@@ -20480,6 +21146,23 @@ index c76497c..93e6a9d 100644
 +            return;
 +         }
 +
++         // Preserve the native course heading as a read-only TextField stop,
++         // then expose dishes. Never announce an entire course as one action.
++         if(_loc7_ == "widgets.Restaurant.RestaurantMenu::CourseCellView")
++         {
++            if("txtCourseLabel" in param1)
++            {
++               var courseLabel:TextField = Object(param1)["txtCourseLabel"] as TextField;
++               if(courseLabel != null && courseLabel.text.length > 0 && this.A11yIsLive(courseLabel))
++               {
++                  _loc6_ = courseLabel.getBounds(courseLabel.stage);
++                  if(_loc6_.width > 2 && _loc6_.height > 2 && (this.A11yIntersectsStage(courseLabel) || this.A11yCanRevealOnStage(courseLabel)) && this.A11yInListViewport(courseLabel)) { param2.push(courseLabel); }
++               }
++            }
++            if("mcFoodGrid" in param1) { this.A11yCollectFocusables(Object(param1)["mcFoodGrid"] as DisplayObject,param2,param3 + 1); }
++            return;
++         }
++
 +         // Compound cards retain their readable row and expose only native
 +         // child actions. No action is synthesized for Social Bunny text rows.
 +         var childActions:Array = null;
@@ -20487,6 +21170,8 @@ index c76497c..93e6a9d 100644
 +         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFriendCellView") { childActions = ["btnSendMessage","btnRemoveFriend"]; }
 +         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaFeedCellView") { childActions = ["btnReaction","btnAddFriend","mcReactionsGrid"]; }
 +         else if(_loc7_ == "widgets.Gameplay.SocialMedia::SocialMediaMessageDMCellView") { childActions = ["btnReaction","mcReactionsGrid"]; }
++         else if(_loc7_ == "widgets.Gameplay.Clubs.controls::ClubRulesCellView" || _loc7_ == "widgets.shared.controls::RuleCellView" || _loc7_ == "widgets.shared.controls::FoodCellView") { childActions = ["btnDelete"]; }
++         else if(_loc7_ == "widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView") { childActions = ["mcContent"]; }
 +         else if(_loc7_ == "widgets.Gameplay.Clubs.ClubManagement.controls::ClubCellView") { childActions = ["btnDetails","btnAction"]; }
 +         else if(_loc7_ == "widgets.Exchange.Subscriptions.controls::SubscriptionCellView") { childActions = ["btnFollow","btnBlock","btnUnblock"]; }
 +         else if(_loc7_ == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitCellView") { childActions = ["btnTravel","btnViewAgreement","btnFillVacancy"]; }
@@ -21670,8 +22355,39 @@ index c76497c..93e6a9d 100644
 +         var label:Object = null;
 +         var field:TextField = null;
 +         var value:String = "";
++         var owner:DisplayObject = null;
++         var ownerName:String = "";
++         var controlName:String = "";
++         var suffix:String = "";
 +         try
 +         {
++            // Business dropdowns/outfit buttons display their labels beside
++            // the control. Read the exact linked label, never nearby guesses.
++            owner = item != null ? item.parent : null;
++            if(owner != null)
++            {
++               ownerName = getQualifiedClassName(owner);
++               controlName = item.name;
++               if((ownerName == "widgets.Gameplay.BusinessSettings::ManagementSettingsContainer" && controlName.indexOf("btnDropdown") == 0) || (ownerName == "widgets.Gameplay.BusinessSettings::EmployeeSettingsContainer" && controlName.indexOf("btnOutfit") == 0))
++               {
++                  suffix = controlName.substr(controlName.length - 1);
++                  if((suffix == "1" || suffix == "2" || suffix == "3") && controlName in owner && Object(owner)[controlName] == item && ("txtLabel" + suffix) in owner)
++                  {
++                     label = Object(owner)["txtLabel" + suffix];
++                     field = label as TextField;
++                  }
++               }
++               else if(owner.parent != null && getQualifiedClassName(owner.parent) == "widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView" && "mcContent" in owner.parent && Object(owner.parent)["mcContent"] == owner && (controlName == "btnSalary" || controlName == "btnFire") && controlName in owner && Object(owner)[controlName] == item && "txtSimName" in owner)
++               {
++                  field = Object(owner)["txtSimName"] as TextField;
++               }
++               if(field != null && field.visible && this.A11yIsLive(field))
++               {
++                  value = this.A11yTextValue(field);
++                  if(value != null && value.length > 0) { result.unshift("-999998|0|" + value); }
++                  return;
++               }
++            }
 +            while(node != null && depth < 4)
 +            {
 +               if("lbLabel" in node && "ddDropdown" in node)
@@ -21928,6 +22644,10 @@ index c76497c..93e6a9d 100644
 +            // Native CellView controller artwork is not an independent action.
 +            // Follow the parent's explicit link, not a spoken-label heuristic.
 +            if(item.name == "mcControllerHighlight" && "mcControllerHighlight" in item.parent && Object(item.parent)["mcControllerHighlight"] == item) { return true; }
++            // Jewelry Draw/DisablePicker explicitly switches these branches.
++            // Row reads skip global visibility pruning, so remove only these
++            // known dormant branches, not newly animated controls elsewhere.
++            if(getQualifiedClassName(item.parent) == "widgets.Gameplay.JewelryCrafting::JewelryMaterialCellView" && (item.name == "mcLabels" || item.name == "mcContent" || item.name == "txtNotNeededCrystal") && !item.visible) { return true; }
 +            // WorldCellView.Draw only fills pack captions for a locked world.
 +            // Its dormant authoring clips otherwise still contain Pack Name.
 +            if((item.name == "mcPackInfo" || item.name == "btnUnlock") && getQualifiedClassName(item.parent) == "widgets.GameEntry.WorldSelection.controls::WorldCellView" && "btnUnlock" in item.parent && Object(item.parent)["btnUnlock"] != null && !Object(item.parent)["btnUnlock"].visible) { return true; }
@@ -22036,6 +22756,9 @@ index c76497c..93e6a9d 100644
 +      {
 +         if(item == null) { return false; }
 +         if(getQualifiedClassName(item) == "widgets.shared.controls.Scenarios::ScenarioDisplayGroupCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitRegionCellView" || getQualifiedClassName(item) == "widgets.Gameplay.SimInfoHUD.HouseholdInfoVenuePanel.RentalUnit::RentalUnitLotCellView") { return true; }
++         // Native restaurant courses are headings plus a nested dish grid.
++         // Warning containers have no click handler; their inner buttons do.
++         if(getQualifiedClassName(item) == "widgets.Restaurant.RestaurantMenu::CourseCellView" || getQualifiedClassName(item) == "widgets.shared.controls::ButtonWarningContainer" || getQualifiedClassName(item) == "widgets.Gameplay.RestaurantSettings::GenericTextButtonWarningContainer") { return true; }
 +         // Options categories are children of a ButtonBar, not one giant
 +         // button containing every category name.
 +         if(this.mA11ySimplifiedMenus && this.A11ySimplifiedActive() && getQualifiedClassName(item) == "scaleform.clik.controls::ButtonBar") { return true; }
@@ -23282,6 +24005,126 @@ index c76497c..93e6a9d 100644
 +         // A queued menu key must not fall back to the whole stage after close.
 +         if(!this.A11yIsModalScope(this.mA11yScope) && !this.A11yIsModalScope(this.mA11yPendingScope)) { return; }
 +         this.A11yTabMove(-1);
++      }
++
++      // Unbound explicit UI Cheats action. No keyboard shortcut is assigned.
++      public function A11yRightClickOwner(item:DisplayObject) : Object
++      {
++         var node:DisplayObject = item;
++         var depth:int = 0;
++         var index:int = 0;
++         var cls:Class = null;
++         var extension:Object = null;
++         var bar:DisplayObject = null;
++         var receiver:DisplayObject = null;
++         var receiverDepth:int = 0;
++         var types:Array = ["GenericCheatsExtension","ProgressBarCheatExtension","BuffCheatsExtension","GoalCheatsExtension","RelCheatsExtension","CareerPromotionCheatsExtension","MoneyAndBucksCheatsExtension","BucksCheatsExtension","WeatherEventCheatsExtension","WhimCheatsExtension","MilestonesCheatsExtension"];
++         while(node != null && depth < 8)
++         {
++            if(!this.A11yIsLive(node)) { return null; }
++            if("GetExtension" in node)
++            {
++               index = 0;
++               while(index < types.length)
++               {
++                  try
++                  {
++                     cls = getDefinitionByName("olympus.extensions.cheats." + types[index]) as Class;
++                     // The second argument is false: never attach an extension.
++                     extension = Object(node)["GetExtension"](cls,false);
++                     if(extension != null)
++                     {
++                        bar = node;
++                        if(types[index] == "GenericCheatsExtension" && (!("cheatType" in extension) || !extension["cheatType"])) { extension = null; }
++                        if(types[index] == "ProgressBarCheatExtension")
++                        {
++                           bar = extension["mcProgressBar"] as DisplayObject;
++                           if(bar == null || !("mID" in extension) || !extension["mID"] || !this.A11yIsInside(bar,node)) { extension = null; }
++                        }
++                        if(extension != null && (types[index] == "MoneyAndBucksCheatsExtension" || types[index] == "BucksCheatsExtension" || types[index] == "MilestonesCheatsExtension"))
++                        {
++                           // These extensions' Setup methods attach listeners
++                           // to the supplied child controls, not to Extend().
++                           // Use the nearest real click receiver, never bubble
++                           // to another milestone/category or currency handler.
++                           receiver = item;
++                           receiverDepth = 0;
++                           while(receiver != null && receiverDepth < 8 && this.A11yIsInside(receiver,node))
++                           {
++                              if(this.A11yIsLive(receiver) && receiver.hasEventListener(MouseEvent.CLICK)) { return {owner:receiver,hit:item}; }
++                              if(receiver == node) { break; }
++                              receiver = receiver.parent;
++                              receiverDepth = receiverDepth + 1;
++                           }
++                           extension = null;
++                        }
++                        if(extension != null && this.A11yIsLive(bar)) { return {owner:node,hit:bar}; }
++                     }
++                  }
++                  catch(missing:Error) { }
++                  index = index + 1;
++               }
++            }
++            if(node == this.mA11yScope) { return null; }
++            node = node.parent;
++            depth = depth + 1;
++         }
++         return null;
++      }
++
++      public function A11yTryRightClick() : Boolean
++      {
++         var target:DisplayObject = null;
++         var info:Object = null;
++         var owner:DisplayObject = null;
++         var hit:DisplayObject = null;
++         var bounds:Rectangle = null;
++         var point:Point = null;
++         var event:MouseEventEx = null;
++         try
++         {
++            this.A11yModalFrame();
++            if(!this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || this.mA11yStartupActive || this.A11yWorldHudMode() != 1 || this.A11yEditing() || this.mA11yPendingScope != null || this.mA11yIdxDir != 0) { return false; }
++            // GenericCheatsExtension is supplied by UI Cheats, not by the
++            // native base movie. Resolve it at runtime, never import it.
++            if(getDefinitionByName("olympus.extensions.cheats.GenericCheatsExtension") == null) { return false; }
++            target = this.mA11yFocused;
++            if(!this.A11yIsLive(target) || this.mA11yScope == null || !this.A11yIsInside(target,this.mA11yScope)) { return false; }
++            if(this.A11yIsLive(this.mA11yActiveModalRoot) && !this.A11yIsInside(target,this.mA11yActiveModalRoot)) { return false; }
++            info = this.A11yRightClickOwner(target);
++            if(info == null) { return false; }
++            owner = info["owner"] as DisplayObject;
++            hit = info["hit"] as DisplayObject;
++            if(!this.A11yIsLive(owner) || !this.A11yIsLive(hit) || !this.A11yIntersectsStage(hit) || !this.A11yInListViewport(hit)) { return false; }
++            if(("enabled" in owner && Object(owner)["enabled"] == false) || ("mouseEnabled" in owner && Object(owner)["mouseEnabled"] == false)) { return false; }
++            bounds = hit.getBounds(hit);
++            if(bounds == null || bounds.width <= 0 || bounds.height <= 0) { return false; }
++            point = hit.localToGlobal(new Point(bounds.x + bounds.width / 2,bounds.y + bounds.height / 2));
++            if(point == null || !isFinite(point.x) || !isFinite(point.y) || !hit.hitTestPoint(point.x,point.y)) { return false; }
++            if(point.x < 0 || point.y < 0 || point.x >= owner.stage.stageWidth || point.y >= owner.stage.stageHeight) { return false; }
++            point = owner.globalToLocal(point);
++            if(point == null || !isFinite(point.x) || !isFinite(point.y)) { return false; }
++            // Never fall back to a plain MouseEvent: InputUtils requires the
++            // extended right-button identity; a plain event may look like left.
++            event = new MouseEventEx(MouseEvent.CLICK,false,false);
++            event.buttonIdx = MouseEventEx.RIGHT_BUTTON;
++            event.localX = point.x;
++            event.localY = point.y;
++            this.mA11yActivating = true;
++            // One click on the extension owner, no down/up and no bubbling:
++            // avoids firing both the progress bar and its container listener.
++            owner.dispatchEvent(event);
++            this.mA11yActivating = false;
++            this.A11yPostToPython("a11y.mark","right-click|sent|" + getQualifiedClassName(owner) + "|" + event.stageX + "|" + event.stageY);
++            return true;
++         }
++         catch(error:Error) { this.mA11yActivating = false; }
++         return false;
++      }
++
++      public function A11yMsgRightClick(param1:Object = null) : void
++      {
++         if(!this.A11yTryRightClick()) { this.A11yPostToPython("a11y.mark","right-click|blocked"); this.A11yPostToPython("a11y.widget_enc",encodeURIComponent("0|0|action unavailable")); }
 +      }
 +
 +      public function A11yMsgActivate(param1:Object = null) : void
@@ -25088,6 +25931,37 @@ index 0000000..47a87b6
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/tools/run_checks_v10.py b/tools/run_checks_v10.py
+index ca18160..58508c2 100644
+--- a/tools/run_checks_v10.py
++++ b/tools/run_checks_v10.py
+@@ -63,18 +63,24 @@ def main():
+         log = build / ('v10-' + path.stem + '.log')
+         log.write_text(output, encoding='utf-8')
+         count = check_count(output)
++        skipped = (path.name == 'test_prelaunch_helper.py' and returncode == 77 and
++                   output.startswith('SKIP:'))
+         passed = returncode == 0 and count > 0
+         results.append({'suite': path.relative_to(ROOT).as_posix(),
+                         'kind': 'python' if path.suffix == '.py' else 'as_source_fixture',
+                         'returncode': returncode, 'checks': count, 'passed': passed,
++                        'skipped': skipped,
+                         'log': log.relative_to(ROOT).as_posix(), 'log_sha256': sha(log)})
+-        print('{}: {} ({} checks)'.format(path.name, 'PASS' if passed else 'FAIL', count), flush=True)
++        print('{}: {} ({} checks)'.format(path.name, 'SKIP' if skipped else ('PASS' if passed else 'FAIL'), count), flush=True)
+         if not passed:
+             print(output[-5000:], flush=True)
+     stable = inputs == input_hashes()
+     passed = bool(results) and stable and all(item['passed'] for item in results)
+     report = {'started_utc': started, 'finished_utc': datetime.now(timezone.utc).isoformat(),
+-              'passed': passed, 'input_stable': stable, 'inputs': inputs, 'results': results}
++              'passed': passed, 'input_stable': stable,
++              'skipped_suites': [item['suite'] for item in results if item['skipped']],
++              'failed_suites': [item['suite'] for item in results if not item['passed'] and not item['skipped']],
++              'inputs': inputs, 'results': results}
+     (build / 'v10-checks.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+     print('{} checks across {} isolated suites (includes repeated imported checks).'.format(
+         sum(item['checks'] for item in results), len(results)))
 diff --git a/tools/test_apartments_scenarios.js b/tools/test_apartments_scenarios.js
 new file mode 100644
 index 0000000..58dbcda
@@ -25580,6 +26454,21 @@ index 0000000..c6314d5
 + def test_park_does_not_move_an_unfocused_window(self):
 +  self.u.owner=0;c.park_mouse();self.assertFalse(self.u.events)
 +if __name__=='__main__':unittest.main()
+diff --git a/tools/test_build_cursor.py b/tools/test_build_cursor.py
+index 144ac68..e924c10 100644
+--- a/tools/test_build_cursor.py
++++ b/tools/test_build_cursor.py
+@@ -149,7 +149,9 @@ class CursorTests(unittest.TestCase):
+         self.spoken, self.sent = [], []
+         self.fits = {}
+         patches = [
+-            patch.dict('sys.modules', {'tyjokr_a11y_place': self.place}),
++            patch.dict('sys.modules', {'tyjokr_a11y_place': self.place,
++                # Chair behavior has native-transaction coverage in test_chair_snapping.
++                'tyjokr_a11y_chair_snap': types.SimpleNamespace(try_place=lambda *a:None,fit_parts=lambda *a:None)}),
+             patch.object(grid, 'active', return_value=True),
+             patch.object(grid, '_surface', return_value='surface'),
+             patch.object(grid, '_flash', side_effect=self.sent.append),
 diff --git a/tools/test_build_helpers.py b/tools/test_build_helpers.py
 new file mode 100644
 index 0000000..fb0456e
@@ -25719,6 +26608,148 @@ index 0000000..fb0456e
 +   h._house_context.transitions=()
 +   self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
 +   planner._original_stairs.assert_called_once_with((0,0),(0,1))
++if __name__=='__main__':unittest.main()
+diff --git a/tools/test_chair_snapping.py b/tools/test_chair_snapping.py
+new file mode 100644
+index 0000000..c41a4bd
+--- /dev/null
++++ b/tools/test_chair_snapping.py
+@@ -0,0 +1,136 @@
++"""Native seating slots: preview, exact recheck, parenting and payment failures."""
++import types,sys,unittest
++from unittest.mock import patch
++import test_placement as env
++import tyjokr_a11y_chair_snap as snap
++import tyjokr_a11y_grid as grid
++import tyjokr_a11y_layers as layers
++import tyjokr_a11y_tiles as tiles
++import tyjokr_a11y_settings as settings
++import tyjokr_a11y_scanner as scanner
++
++Q=lambda:types.SimpleNamespace(x=0.,y=0.,z=0.,w=1.)
++class Seat:
++ def __init__(self,owner,ident=100,position=None):
++  self.owner=owner;self.slot_name_hash=ident;self.position=position or env.Vec(3.5,0,3.5)
++  self.transform=types.SimpleNamespace(orientation=Q());self.is_enabled=True;self.occupied=False
++  self.valid=True;self.deco=False;self.calls=[];self.fail_parent=False;self.wrong_hash=False
++ @property
++ def children(self):return [o for o in env.world.objects.values() if getattr(o,'parent',None) is self.owner and getattr(getattr(o,'location',None),'slot_hash',None)==self.slot_name_hash]
++ @property
++ def empty(self):return not self.occupied and not self.children
++ def is_deco_slot(self):return self.deco
++ def is_valid_for_placement(self,*,obj=None,definition=None):
++  self.calls.append(('object' if obj is not None else 'definition',obj or definition));return self.valid
++ def add_child(self,obj):
++  obj.parent=types.SimpleNamespace(is_part=False) if self.fail_parent else self.owner
++  obj.location=types.SimpleNamespace(slot_hash=999 if self.wrong_hash else self.slot_name_hash,joint_name_hash=None)
++  obj.position=self.position;obj.orientation=self.transform.orientation
++
++class Tests(unittest.TestCase):
++ setUp_base=env.PlacementTests.setUp
++ choose=env.PlacementTests.choose;ack=env.PlacementTests.ack;serial=env.PlacementTests.serial;said=env.PlacementTests.said
++ def setUp(self):
++  self.setUp_base();env.place._pending.update(chair_request=None,surface_id=None)
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDiningChair']
++  definition=env.Definition(700,100);definition.get_tags=lambda:['BuyCatSSDiningTable']
++  self.table=env.Obj(77,definition,position=env.Vec(3.5,0,4.5));self.table.orientation=Q();self.table.owner=env.world.household
++  self.part=types.SimpleNamespace(is_part=True,part_owner=self.table,part_group_index=0)
++  self.seat=Seat(self.part);self.table.slots=[self.seat];env.world.objects[77]=self.table
++  self.focus=self.table;self.locations={(3,4):[self.table]}
++  self.frame=types.SimpleNamespace(inside=lambda i,j:True,tile_of=lambda x,z:(int(x),int(z)))
++  self.patches=[patch.dict(sys.modules,tag=types.SimpleNamespace(Tag=lambda value:types.SimpleNamespace(name=value))),
++   patch.object(grid,'_tile',(3,3)),patch.object(grid,'_level',0),patch.object(grid,'_facing',0),
++   patch.object(grid,'cursor',lambda:(env.Vec(grid._tile[0]+.5,0,grid._tile[1]+.5),0,'id')),
++   patch.object(grid,'_surface',lambda:'surface'),patch.object(grid,'_name',lambda obj:'Native table name'),
++   patch.object(layers,'focused_target',lambda:self.focus),
++   patch.object(tiles,'frame',lambda:self.frame),
++   patch.object(tiles,'position',lambda f,i,j,l:env.Vec(i+.5,0,j+.5)),
++   patch.object(tiles,'objects_on',lambda f,i,j,l:self.locations.get((i,j),[])),
++   patch.object(tiles,'relative',lambda di,dj:'relative {}, {}'.format(di,dj)),
++   patch.object(scanner,'_speak_parts',lambda parts:self.parts.append(''.join(str(x) for x in parts))),
++   patch.object(settings,'get',lambda key,default=None:default)]
++  for p in self.patches:p.start();self.addCleanup(p.stop)
++  self.choose(name='Dining chair')
++ def request(self):return snap.try_place(env.place.product(),self.frame)
++ def test_native_part_seat_sets_rotation_and_uses_original_payment_transaction(self):
++  self.assertTrue(grid._build_place());self.assertTrue(self.ack())
++  obj=env.world.objects[env.place._last['obj_id']]
++  self.assertIs(obj.parent,self.part);self.assertIs(obj.orientation,self.seat.transform.orientation)
++  self.assertEqual(obj.moves,[]);self.assertEqual(env.world.funds.money,700)
++  self.assertEqual([c[0] for c in self.seat.calls],['definition','object'])
++  self.assertTrue(self.said('Native table name'))
++ def test_occupied_seat_refuses_without_creating_or_buying(self):
++  self.seat.occupied=True;self.assertFalse(self.request());self.assertEqual(set(env.world.objects),{77});self.assertEqual(env.world.funds.money,1000)
++ def test_native_definition_refusal_is_authoritative(self):
++  self.seat.valid=False;self.assertFalse(self.request());self.assertEqual(env.world.funds.money,1000)
++ def test_disabled_and_decorative_slots_are_not_seats(self):
++  for attribute in ['is_enabled','deco']:
++   self.seat.is_enabled=True;self.seat.deco=False;setattr(self.seat,attribute,False if attribute=='is_enabled' else True)
++   self.assertFalse(self.request())
++ def test_same_seat_must_still_be_available_at_acknowledgement(self):
++  other=Seat(self.part,101,env.Vec(4.5,0,4.5));self.table.slots.append(other)
++  self.assertTrue(self.request());self.seat.occupied=True;self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000);self.assertEqual(other.calls,[])
++ def test_table_moved_before_acknowledgement_refuses(self):
++  self.assertTrue(self.request());self.table.position=env.Vec(9,0,9)
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_seat_transform_changed_before_acknowledgement_refuses(self):
++  self.assertTrue(self.request());self.seat.position=env.Vec(4.5,0,3.5)
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_focus_or_cursor_change_refuses(self):
++  self.assertTrue(self.request());self.focus=None
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_actual_object_can_be_refused_after_a_valid_preview(self):
++  self.assertTrue(self.request());self.seat.valid=False
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000);self.assertEqual(set(env.world.objects),{77})
++ def test_wrong_parent_is_rejected_before_payment(self):
++  self.seat.fail_parent=True;self.assertTrue(self.request());self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_wrong_slot_hash_is_rejected_before_payment(self):
++  self.seat.wrong_hash=True;self.assertTrue(self.request());self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000)
++ def test_registration_must_preserve_the_native_attachment(self):
++  self.assertTrue(self.request())
++  def register(obj):obj.parent=None;return True
++  with patch.object(env.place,'_register',register):self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000)
++ def test_failed_payment_removes_the_chair_and_frees_the_seat(self):
++  env.world.funds.fail_remove='refuse';self.assertTrue(self.request());self.assertFalse(self.ack())
++  self.assertEqual(env.world.funds.money,1000);self.assertTrue(self.seat.empty)
++ def test_native_part_slot_is_preferred_over_its_root_duplicate(self):
++  root_slot=Seat(self.table,100);self.table.slots=[root_slot,self.seat]
++  self.assertTrue(self.request());self.assertTrue(self.ack());self.assertEqual(root_slot.calls,[])
++ def test_nearby_table_can_snap_without_focusing_it(self):
++  self.focus=None;self.assertTrue(self.request());self.assertTrue(self.ack())
++ def test_facing_away_keeps_ordinary_floor_placement(self):
++  self.focus=None;grid._facing=2;self.assertIsNone(self.request());self.assertEqual(env.place._pending['serial'],0)
++ def test_equally_near_tables_require_explicit_focus(self):
++  self.focus=None;other=env.Obj(78,self.table.definition);other.orientation=Q();self.locations={(2,4):[self.table],(4,4):[other]}
++  self.assertFalse(self.request());self.assertEqual(env.place._pending['serial'],0)
++ def test_unrelated_objects_and_disabled_setting_delegate_unchanged(self):
++  env.world.definitions[501].get_tags=lambda:[];self.assertIsNone(self.request())
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDiningChair']
++  with patch.object(settings,'get',lambda key,default=None:False if key=='chair_snapping' else default):self.assertIsNone(self.request())
++ def test_desk_chair_matches_a_desk(self):
++  env.world.definitions[501].get_tags=lambda:['BuyCatSSDeskChair'];self.table.definition.get_tags=lambda:['BuyCatSSDesk']
++  self.assertTrue(self.request());self.assertTrue(self.ack())
++ def test_native_config_can_disable_snapping_independently(self):
++  self.assertEqual(settings._FILE_MAP[('build cursor','chair snapping')],'chair_snapping')
++  saved=dict(settings._stored)
++  try:
++   settings._apply_value('chair_snapping','off')
++   self.assertIs(settings._stored['chair_snapping'],False)
++   self.assertIn('chair snapping = off',settings._render(settings._stored))
++  finally:
++   settings._stored.clear();settings._stored.update(saved)
++ def test_busy_request_cannot_replace_the_requested_seat(self):
++  self.assertTrue(self.request());saved=env.place._pending['chair_request'];serial=self.serial()
++  self.assertFalse(self.request());self.assertIs(env.place._pending['chair_request'],saved)
++  self.assertEqual(self.serial(),serial);self.assertTrue(self.ack())
++ def test_zone_change_drops_the_request_before_creation_or_payment(self):
++  self.assertTrue(self.request());env.world.zone_id=8
++  self.assertFalse(self.ack());self.assertEqual(env.world.funds.money,1000);self.assertEqual(set(env.world.objects),{77})
++ def test_preview_is_read_only_and_retains_native_names(self):
++  parts=grid._fit_parts(self.frame);self.assertIn('Native table name',parts)
++  self.assertEqual(set(env.world.objects),{77});self.assertEqual(env.world.funds.money,1000);self.assertEqual(env.place._pending['serial'],0)
++
 +if __name__=='__main__':unittest.main()
 diff --git a/tools/test_cleaning_diagnostic.py b/tools/test_cleaning_diagnostic.py
 new file mode 100644
@@ -27058,6 +28089,185 @@ index c4fdbd9..7ec211c 100644
 + box.kind='unrelated::LeftLabelCheckBox';assert.equal(ui.A11yCheckboxState(box),'');
 +});
 +console.log(checks + ' Options simplified checks passed (not in-game verification).');
+diff --git a/tools/test_prelaunch_helper.py b/tools/test_prelaunch_helper.py
+index 08a10f4..4c7252d 100644
+--- a/tools/test_prelaunch_helper.py
++++ b/tools/test_prelaunch_helper.py
+@@ -1,6 +1,7 @@
+-"""Runs tools/test_prelaunch_helper.ps1 so the pre-launch helper's offline
+-checks are part of run_checks_v10 (which only collects .py and .js suites).
+-Run with py -3.7 tools/test_prelaunch_helper.py.
++"""Optional Windows setup-helper checks; exit 77 when PowerShell cannot start.
++
++This helper enables mods before launching the game. It is not mod runtime code.
++Only the startup probe may skip; failures after startup remain test failures.
+ """
+ from pathlib import Path
+ import shutil
+@@ -9,16 +10,30 @@ import sys
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ SCRIPT = ROOT / 'tools' / 'test_prelaunch_helper.ps1'
++SKIP = 77
+ 
+ 
+ def main():
+     shell = shutil.which('powershell') or shutil.which('pwsh')
+     if shell is None:
+-        print('no PowerShell on this machine')
++        print('SKIP: optional setup helper requires PowerShell')
++        return SKIP
++    flags = [shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass']
++    try:
++        probe = subprocess.run(flags + ['-Command', '[Console]::WriteLine("TS4_HELPER_READY")'],
++                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        print('SKIP: PowerShell startup unavailable: ' + str(exc))
++        return SKIP
++    if probe.returncode != 0 or b'TS4_HELPER_READY' not in probe.stdout:
++        print('SKIP: PowerShell startup probe failed: ' + probe.stdout.decode('utf-8', 'replace'))
++        return SKIP
++    try:
++        result = subprocess.run(flags + ['-File', str(SCRIPT)], cwd=str(ROOT),
++                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        print('FAIL: setup helper tests failed after PowerShell startup: ' + str(exc))
+         return 1
+-    result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+-                             '-File', str(SCRIPT)], cwd=str(ROOT), stdout=subprocess.PIPE,
+-                            stderr=subprocess.STDOUT, timeout=110)
+     sys.stdout.write(result.stdout.decode('utf-8', 'replace'))
+     return result.returncode
+ 
+diff --git a/tools/test_prelaunch_runner.py b/tools/test_prelaunch_runner.py
+new file mode 100644
+index 0000000..a8356d5
+--- /dev/null
++++ b/tools/test_prelaunch_runner.py
+@@ -0,0 +1,47 @@
++"""No PowerShell or game actions: test setup-helper launcher outcomes."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import unittest
++from unittest.mock import patch
++
++spec = importlib.util.spec_from_file_location('helper_runner', str(Path(__file__).with_name('test_prelaunch_helper.py')))
++runner = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(runner)
++
++class LauncherTests(unittest.TestCase):
++    def invoke(self, effects):
++        with patch.object(runner.shutil, 'which', return_value='powershell'), patch.object(runner.subprocess, 'run', side_effect=effects) as call:
++            result = runner.main()
++            return result, call
++
++    def test_missing_shell_skips(self):
++        with patch.object(runner.shutil, 'which', return_value=None):
++            self.assertEqual(runner.main(), 77)
++
++    def test_startup_timeout_skips_without_running_suite(self):
++        result, call = self.invoke([subprocess.TimeoutExpired('probe', 5)])
++        self.assertEqual(result, 77)
++        self.assertEqual(call.call_count, 1)
++        self.assertEqual(call.call_args[1]['timeout'], 5)
++
++    def test_bad_probe_skips(self):
++        result, call = self.invoke([subprocess.CompletedProcess([], 1, b'bad startup')])
++        self.assertEqual(result, 77)
++        self.assertEqual(call.call_count, 1)
++
++    def test_native_suite_failure_is_not_skipped(self):
++        result, call = self.invoke([subprocess.CompletedProcess([], 0, b'TS4_HELPER_READY'), subprocess.CompletedProcess([], 1, b'FAIL')])
++        self.assertEqual(result, 1)
++        self.assertEqual(call.call_count, 2)
++
++    def test_native_suite_timeout_is_not_skipped(self):
++        result, call = self.invoke([subprocess.CompletedProcess([], 0, b'TS4_HELPER_READY'), subprocess.TimeoutExpired('suite', 90)])
++        self.assertEqual(result, 1)
++
++    def test_success(self):
++        result, call = self.invoke([subprocess.CompletedProcess([], 0, b'TS4_HELPER_READY'), subprocess.CompletedProcess([], 0, b'ALL 50 CHECKS PASSED')])
++        self.assertEqual(result, 0)
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tools/test_proactive_ui_native.js b/tools/test_proactive_ui_native.js
+new file mode 100644
+index 0000000..50fc256
+--- /dev/null
++++ b/tools/test_proactive_ui_native.js
+@@ -0,0 +1,70 @@
++/* Execute production AS3 against native-shaped display trees. */
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm');
++const fixture=fs.readFileSync(path.join(__dirname,'test_flash_navigation_v10.js'),'utf8');
++const head=fixture.slice(0,fixture.indexOf('let passed = 0;'));
++const checks=String.raw`
++let passed=0;
++function test(name,run){run();passed++;console.log('PASS '+name);}
++function ui(){const u=manager();u.A11yIsLive=method(tooltip,'A11yIsLive');return u;}
++function button(p,name){const b=p.add(new MovieClip(name,'olympus.gui.buttons::Button'));b.focusable=true;b.enabled=true;return b;}
++function stops(u,row){const a=[];u.A11yCollectFocusables(row,a,0);return a;}
++function text(u,row){const a=[];u.A11yCollectText(row,a,0,false);return a.map(x=>x.slice(x.lastIndexOf('|')+1));}
++for(const kind of ['widgets.Gameplay.Clubs.controls::ClubRulesCellView','widgets.shared.controls::RuleCellView','widgets.shared.controls::FoodCellView'])test(kind+' exposes visible Remove without activating',()=>{
++ const u=ui(),r=new MovieClip('row',kind);r.focusable=true;r.btnDelete=button(r,'btnDelete');r.activate=r.btnDelete.activate=()=>{throw Error('Traversal must not activate');};
++ assert.deepStrictEqual(stops(u,r),[r,r.btnDelete]);r.btnDelete.visible=false;assert.deepStrictEqual(stops(u,r),[r]);r.visible=false;assert.deepStrictEqual(stops(u,r),[]);
++});
++test('hover-owned Remove stays hidden until native hover shows it',()=>{
++ const u=ui(),r=new MovieClip('row','widgets.Gameplay.Clubs.controls::ClubRulesCellView');r.focusable=true;r.btnDelete=button(r,'btnDelete');r.btnDelete.visible=false;
++ assert.deepStrictEqual(stops(u,r),[r]);assert.equal(r.btnDelete.visible,false);r.btnDelete.visible=true;assert.deepStrictEqual(stops(u,r),[r,r.btnDelete]);
++});
++test('restaurant course exposes dishes and Add instead of inert heading',()=>{
++ const u=ui(),r=new MovieClip('course','widgets.Restaurant.RestaurantMenu::CourseCellView');r.focusable=true;r.txtCourseLabel=r.add(new TextField('txtCourseLabel','Native course heading'));r.mcFoodGrid=r.add(new MovieClip('mcFoodGrid'));
++ const add=button(r.mcFoodGrid,'add'),dish=button(r.mcFoodGrid,'dish');assert.deepStrictEqual(stops(u,r),[r.txtCourseLabel,add,dish]);assert.deepStrictEqual(text(u,r.txtCourseLabel),['Native course heading']);dish.visible=false;assert.deepStrictEqual(stops(u,r),[r.txtCourseLabel,add]);r.txtCourseLabel.visible=false;assert.deepStrictEqual(stops(u,r),[add]);
++});
++for(const kind of ['widgets.shared.controls::ButtonWarningContainer','widgets.Gameplay.RestaurantSettings::GenericTextButtonWarningContainer'])test(kind+' exposes actual inner buttons',()=>{
++ const u=ui(),r=new MovieClip('wrapper',kind);r.focusable=true;r.btnButton=button(r,'btnButton');r.btnTextButton=button(r,'btnTextButton');r.btnButton.visible=false;
++ assert.deepStrictEqual(stops(u,r),[r.btnTextButton]);r.btnTextButton.visible=false;r.btnButton.visible=true;assert.deepStrictEqual(stops(u,r),[r.btnButton]);
++});
++test('small-business protected actions accessible through public mcContent',()=>{
++ const u=ui(),r=new MovieClip('employee','widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView');r.focusable=true;r.enabled=false;r.mcContent=r.add(new MovieClip('mcContent'));
++ r.mcContent.btnSalary=button(r.mcContent,'btnSalary');r.mcContent.btnFire=button(r.mcContent,'btnFire');assert(!('btnSalary' in r));assert(!('btnFire' in r));
++ assert.deepStrictEqual(stops(u,r),[r,r.mcContent.btnSalary,r.mcContent.btnFire]);r.mcContent.btnSalary.visible=r.mcContent.btnFire.visible=false;assert.deepStrictEqual(stops(u,r),[r]);
++});
++test('unrelated cell retains original traversal',()=>{
++ const u=ui(),r=new MovieClip('row','other::CourseCellView');r.focusable=true;r.btnDelete=button(r,'btnDelete');assert.deepStrictEqual(stops(u,r),[r]);assert.equal(u.A11yCompositeRow(r),false);
++});
++for(const [kind,prefix] of [['ManagementSettingsContainer','btnDropdown'],['EmployeeSettingsContainer','btnOutfit']])test(kind+' reads native sibling labels with existing values',()=>{
++ const u=ui(),r=new MovieClip('settings','widgets.Gameplay.BusinessSettings::'+kind);
++ for(let i=1;i<=3;i++){const b=button(r,prefix+i);r[prefix+i]=b;r['txtLabel'+i]=r.add(new TextField('txtLabel'+i,'Localized '+i));const lines=['0|0|Current value'];u.A11yOptionsRowLabel(b,lines);assert.deepStrictEqual(lines,['-999998|0|Localized '+i,'0|0|Current value']);}
++});
++test('business label requires exact control identity and live field',()=>{
++ const u=ui(),r=new MovieClip('settings','widgets.Gameplay.BusinessSettings::ManagementSettingsContainer');r.txtLabel1=r.add(new TextField('txtLabel1','Markup'));r.btnDropdown1=button(r,'btnDropdown1');const fake=button(r,'btnDropdown1');
++ let lines=[];u.A11yOptionsRowLabel(fake,lines);assert.deepStrictEqual(lines,[]);r.visible=false;lines=[];u.A11yOptionsRowLabel(r.btnDropdown1,lines);assert.deepStrictEqual(lines,[]);r.visible=true;r.txtLabel1.visible=false;lines=[];u.A11yOptionsRowLabel(r.btnDropdown1,lines);assert.deepStrictEqual(lines,[]);
++});
++test('salary/fire labels retain employee context from actual mcContent',()=>{
++ const u=ui(),r=new MovieClip('employee','widgets.Gameplay.SmallBusinessEmployeeManagement.controls::SmallBusinessEmployeeCellView');r.mcContent=r.add(new MovieClip('mcContent'));r.mcContent.txtSimName=r.mcContent.add(new TextField('txtSimName','Employee Name'));
++ for(const name of ['btnSalary','btnFire']){r.mcContent[name]=button(r.mcContent,name);const lines=['0|0|Native action'];u.A11yOptionsRowLabel(r.mcContent[name],lines);assert.deepStrictEqual(lines,['-999998|0|Employee Name','0|0|Native action']);}
++});
++test('unrelated settings do not gain guessed labels',()=>{
++ const u=ui(),r=new MovieClip('settings','other::ManagementSettingsContainer');r.txtLabel1=r.add(new TextField('txtLabel1','Unexpected'));r.btnDropdown1=button(r,'btnDropdown1');const lines=[];u.A11yOptionsRowLabel(r.btnDropdown1,lines);assert.deepStrictEqual(lines,[]);
++});
++test('jewelry narration follows selected/empty/not-needed native branches',()=>{
++ const u=ui(),r=new MovieClip('material','widgets.Gameplay.JewelryCrafting::JewelryMaterialCellView');r.mcContent=r.add(new MovieClip('mcContent'));r.mcContent.add(new TextField('txtName','Selected metal'));r.mcContent.add(new TextField('txtSecondary','Native price'));
++ r.mcLabels=r.add(new MovieClip('mcLabels'));r.mcLabels.add(new TextField('txtClick','Choose a metal'));r.mcLabels.visible=false;r.txtNotNeededCrystal=r.add(new TextField('txtNotNeededCrystal','Crystal not needed'));r.txtNotNeededCrystal.visible=false;
++ assert.deepStrictEqual(text(u,r),['Selected metal','Native price']);r.mcContent.visible=false;r.mcLabels.visible=true;assert.deepStrictEqual(text(u,r),['Choose a metal']);r.mcLabels.visible=false;r.txtNotNeededCrystal.visible=true;assert.deepStrictEqual(text(u,r),['Crystal not needed']);
++});
++test('unrelated transient hidden branches retain original row behavior',()=>{
++ const u=ui(),r=new MovieClip('row','another::JewelryMaterialCellView'),branch=r.add(new MovieClip('mcLabels'));branch.visible=false;branch.add(new TextField('label','Transient text'));assert.deepStrictEqual(text(u,r),['Transient text']);
++});
++test('club reward keeps existing hidden-price handling and visible-price narration',()=>{
++ const u=ui(),r=new MovieClip('reward','widgets.Gameplay.Clubs.ClubRewards.controls::RewardCellView'),c=r.add(new MovieClip('mcTextContainer')),cost=c.add(new TextField('txtAmount','500 club points'));
++ cost.visible=false;assert.deepStrictEqual(text(u,r),[]);cost.visible=true;assert.deepStrictEqual(text(u,r),['500 club points']);r.kind='other::RewardCellView';cost.visible=false;assert.equal(u.A11yTextDecoration(cost),false);
++});
++test('exposed native actions preserve enabled/visibility checks',()=>{
++ const u=ui(),r=new MovieClip('wrapper','widgets.shared.controls::ButtonWarningContainer'),b=button(r,'btnTextButton');u.A11yClickControl=method(tooltip,'A11yClickControl');const calls=[];u.A11ySafeDispatch=(target,event)=>calls.push([target,event]);runtime.MouseEvent={MOUSE_DOWN:'down',MOUSE_UP:'up',CLICK:'click'};
++ b.enabled=false;assert.equal(u.A11yClickControl(b),false);assert.equal(calls.length,0);b.enabled=true;assert.equal(u.A11yClickControl(b),true);assert.deepStrictEqual(calls,[[b,'down'],[b,'up'],[b,'click']]);r.visible=false;calls.length=0;assert.equal(u.A11yClickControl(b),false);assert.equal(calls.length,0);
++});
++console.log(passed+' proactive native UI checks passed (not live-game verification).');
++`;
++vm.runInNewContext(head+checks,{require,console,__dirname},{filename:"proactive-native-fixtures"});
 diff --git a/tools/test_purchase_footer.js b/tools/test_purchase_footer.js
 new file mode 100644
 index 0000000..ecbd744
@@ -27357,6 +28567,263 @@ index 0000000..d250fdd
 +assert.deepStrictEqual(Array.from(requests.at(-1)[1].commandArgs), ['18446744073709551615',11,1.5,3,-4,0,2,0,0,0,3,0,0,true]);
 +assert.strictEqual(pie.mPickResults.pickType,11);checks++;
 +console.log(checks + ' scanner pick bridge checks passed (native services mocked).');
+diff --git a/tools/test_seasons_v14v.js b/tools/test_seasons_v14v.js
+index 8a3fafc..b9e2a65 100644
+--- a/tools/test_seasons_v14v.js
++++ b/tools/test_seasons_v14v.js
+@@ -5,7 +5,7 @@ function method(name){
+  const sig=new RegExp('public function '+name+'\\(([^)]*)\\)\\s*:\\s*\\w+\\s*\\{').exec(source);assert(sig);
+  let start=sig.index+sig[0].length,at=start,depth=1;
+  while(depth){if(source[at]==='{')depth++;if(source[at]==='}')depth--;at++;}
+- const strip=s=>s.replace(/:\s*(DisplayObjectContainer|DisplayObject|Rectangle|String|Object|Boolean|Number|Array|Error|int)\b/g,'').replace(/\s+as\s+(DisplayObjectContainer|DisplayObject)\b/g,'');
++ const strip=s=>s.replace(/:\s*(DisplayObjectContainer|DisplayObject|TextField|Rectangle|String|Object|Boolean|Number|Array|Error|int)\b/g,'').replace(/\s+as\s+(DisplayObjectContainer|DisplayObject|TextField)\b/g,'');
+  return vm.runInNewContext('(function('+strip(sig[1])+'){'+strip(source.slice(start,at-1))+'})',{getQualifiedClassName:o=>o.kind||'',DisplayObjectContainer:function(){}});
+ }
+ const kind='widgets.GameEntry.WorldSelection.SeasonSelect::SeasonSelectContainer';
+diff --git a/tools/test_speech_process_lifecycle.py b/tools/test_speech_process_lifecycle.py
+new file mode 100644
+index 0000000..e76eaf7
+--- /dev/null
++++ b/tools/test_speech_process_lifecycle.py
+@@ -0,0 +1,159 @@
++"""Speech child ownership: isolated mocks plus real Windows crash cleanup.
++No PowerShell, speech output, game actions or user configuration writes.
++"""
++import ctypes
++import importlib.util
++import os
++from pathlib import Path
++import subprocess
++import sys
++import threading
++import types
++import unittest
++from unittest.mock import Mock, patch
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'Scripts'))
++sys.modules['tyjokr_a11y_settings'] = types.SimpleNamespace(get=lambda key, default=None: default)
++import tyjokr_a11y_speech as speech
++speech.log_enabled = False
++
++
++class FakeProcess:
++    def __init__(self):
++        self.stdin = Mock()
++        self.exited = False
++        self.kills = self.waits = 0
++    def poll(self):
++        return 0 if self.exited else None
++    def kill(self):
++        self.kills += 1
++        self.exited = True
++    def wait(self, timeout):
++        self.waits += 1
++        return 0
++
++
++class LifecycleTests(unittest.TestCase):
++    def setUp(self):
++        speech._sapi_proc = speech._sapi_job = None
++        self.job = Mock()
++        self.proc = FakeProcess()
++        self.jobs = patch('tyjokr_a11y_speech_process.SpeechJob', return_value=self.job)
++        self.jobs.start()
++        self.launch = patch.object(speech.subprocess, 'Popen', return_value=self.proc)
++        self.popen = self.launch.start()
++    def tearDown(self):
++        speech.restart_sapi()
++        self.launch.stop()
++        self.jobs.stop()
++    def test_repeated_init_reuses_owned_child(self):
++        self.assertTrue(speech._try_init_sapi())
++        self.assertTrue(speech._try_init_sapi())
++        self.assertEqual(self.popen.call_count, 1)
++        self.job.assign.assert_called_once_with(self.proc)
++    def test_restart_closes_job_pipe_and_reaps(self):
++        speech._try_init_sapi()
++        speech.restart_sapi()
++        self.job.close.assert_called_once_with()
++        self.assertEqual((self.proc.kills, self.proc.waits), (1, 1))
++        self.proc.stdin.close.assert_called_once_with()
++        self.assertIsNone(speech._sapi_proc)
++        self.assertIsNone(speech._sapi_job)
++        speech.restart_sapi()
++        self.assertEqual(self.proc.waits, 1)
++    def test_assignment_refusal_never_leaves_unowned_child(self):
++        self.job.assign.side_effect = OSError('job refused')
++        self.assertFalse(speech._try_init_sapi())
++        self.assertEqual(self.proc.kills, 1)
++        self.assertEqual(self.proc.waits, 1)
++        self.assertIsNone(speech._sapi_proc)
++        self.job.close.assert_called_once_with()
++    def test_launch_failure_releases_job(self):
++        self.popen.side_effect = OSError('launch refused')
++        self.assertFalse(speech._try_init_sapi())
++        self.job.close.assert_called_once_with()
++    def test_exited_child_reaped_before_replacement(self):
++        speech._try_init_sapi()
++        self.proc.exited = True
++        new = FakeProcess()
++        self.popen.return_value = new
++        self.assertTrue(speech._try_init_sapi())
++        self.assertEqual(self.proc.waits, 1)
++        self.assertEqual(self.proc.kills, 0)
++        self.assertIs(speech._sapi_proc, new)
++    def test_concurrent_init_starts_only_one_child(self):
++        threads = [threading.Thread(target=speech._try_init_sapi) for _ in range(12)]
++        for thread in threads: thread.start()
++        for thread in threads: thread.join()
++        self.assertEqual(self.popen.call_count, 1)
++    def test_blocked_pipe_does_not_block_restart(self):
++        speech._try_init_sapi()
++        entered, release = threading.Event(), threading.Event()
++        def blocked(data):
++            entered.set()
++            release.wait(3)
++        self.proc.stdin.write.side_effect = blocked
++        thread = threading.Thread(target=speech._write_sapi, args=(b'I\n', 'test'))
++        thread.start()
++        try:
++            self.assertTrue(entered.wait(1))
++            speech.restart_sapi()
++            self.assertIsNone(speech._sapi_proc)
++            self.assertEqual(self.proc.kills, 1)
++        finally:
++            release.set()
++            thread.join(4)
++        self.assertFalse(thread.is_alive())
++    def test_child_pipe_not_inherited(self):
++        speech._try_init_sapi()
++        self.assertTrue(self.popen.call_args[1]['close_fds'])
++
++
++@unittest.skipUnless(os.name == 'nt', 'Windows kernel ownership test')
++class WindowsOwnershipTests(unittest.TestCase):
++    def check_parent(self, abrupt):
++        # The harmless child only sleeps: this tests the real kernel job, even
++        # when PowerShell startup is unavailable. Kill a parent to bypass atexit.
++        code = (
++            'import subprocess,sys,time;sys.path.insert(0,sys.argv[1]);'
++            'from tyjokr_a11y_speech_process import SpeechJob;'
++            'job=SpeechJob();'
++            'p=subprocess.Popen([sys.executable,"-c","import time;time.sleep(60)"],close_fds=True);'
++            'job.assign(p);print(p.pid,flush=True);'
++            + ('time.sleep(60)' if abrupt else 'sys.stdin.readline()'))
++        parent = subprocess.Popen([sys.executable, '-u', '-c', code, str(ROOT/'Scripts')],
++                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
++                                  creationflags=0x08000000)
++        handle = None
++        pid = None
++        api = ctypes.WinDLL('kernel32', use_last_error=True)
++        api.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
++        api.OpenProcess.restype = ctypes.c_void_p
++        api.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
++        api.CloseHandle.argtypes = [ctypes.c_void_p]
++        try:
++            pid = int(parent.stdout.readline())
++            handle = api.OpenProcess(0x100000, False, pid)
++            self.assertTrue(handle)
++            if abrupt: parent.kill()
++            else: parent.stdin.write(b'quit\n'); parent.stdin.flush()
++            parent.wait(timeout=5)
++            self.assertEqual(api.WaitForSingleObject(handle, 5000), 0,
++                             'speech-owned child survived its parent')
++        finally:
++            if parent.poll() is None: parent.kill()
++            parent.communicate(timeout=5)
++            if handle: api.CloseHandle(handle)
++            # Only this test's own dummy process, if native ownership regressed.
++            if pid:
++                cleanup = api.OpenProcess(1, False, pid)
++                if cleanup:
++                    api.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
++                    api.TerminateProcess(cleanup, 1)
++                    api.CloseHandle(cleanup)
++    def test_kernel_ends_child_after_parent_crash(self): self.check_parent(True)
++    def test_kernel_ends_child_after_normal_parent_exit(self): self.check_parent(False)
++
++
++if __name__ == '__main__': unittest.main()
+\ No newline at end of file
+diff --git a/tools/test_ui_rightclick.js b/tools/test_ui_rightclick.js
+new file mode 100644
+index 0000000..46279e5
+--- /dev/null
++++ b/tools/test_ui_rightclick.js
+@@ -0,0 +1,47 @@
++/* Execute the unbound right-click action; no game or cheat commands run. */
++'use strict';
++const fs=require('fs'),path=require('path'),vm=require('vm');
++const fixture=fs.readFileSync(path.join(__dirname,'test_flash_navigation_v10.js'),'utf8');
++const head=fixture.slice(0,fixture.indexOf('let passed = 0;'));
++const checks=String.raw`
++let passed=0;
++function test(name,run){run();passed++;console.log('PASS '+name);}
++const cls={};for(const n of ['GenericCheatsExtension','ProgressBarCheatExtension','BuffCheatsExtension','MoneyAndBucksCheatsExtension','MilestonesCheatsExtension'])cls[n]=function(){};
++runtime.MouseEvent={CLICK:'click'};
++runtime.MouseEventEx=function(type,bubbles,cancelable){Object.assign(this,{type,bubbles,cancelable,buttonIdx:0,localX:0,localY:0});};runtime.MouseEventEx.RIGHT_BUTTON=1;
++runtime.Point=function(x,y){this.x=x;this.y=y;};runtime.isFinite=Number.isFinite;
++const adapted=tooltip.replace(/:MouseEventEx\b/g,':Object').replace(/:Class\b/g,':Object').replace(/\s+as\s+Class\b/g,'');
++function fixture(kind='GenericCheatsExtension'){
++ const u=manager(),scope=new MovieClip('panel'),target=scope.add(new MovieClip('target','NativeCheatControl')),messages=[],events=[],lookups=[];
++ Object.assign(u,{mA11yKeyboard:true,mA11yKeyboardLease:999999,mA11yStartupActive:false,mA11yPendingScope:null,mA11yIdxDir:0,mA11yScope:scope,mA11yFocused:target,mA11yActiveModalRoot:null,mA11yActivating:false,A11yModalFrame(){},A11yWorldHudMode:()=>1,A11yIntersectsStage:()=>true,A11yEditing:()=>false,A11yPostToPython:(channel,payload)=>messages.push([channel,payload])});
++ u.A11yIsLive=method(tooltip,'A11yIsLive');
++ for(const n of ['A11yRightClickOwner','A11yTryRightClick','A11yMsgRightClick'])u[n]=method(adapted,n);
++ runtime.getDefinitionByName=name=>{const c=cls[name.split('.').pop()];if(!c)throw Error('absent');return c;};
++ const extension=kind==='GenericCheatsExtension'?{cheatType:'time'}:kind==='ProgressBarCheatExtension'?{mID:'native-commodity'}:{buff_id:'native-buff'};
++ target.GetExtension=(c,create)=>{lookups.push([c,create]);assert.equal(create,false);return c===cls[kind]?extension:null;};
++ target.enabled=true;target.mouseEnabled=true;
++ target.getBounds=()=>({x:10,y:20,width:100,height:40});target.localToGlobal=p=>({x:p.x+200,y:p.y+300});target.globalToLocal=p=>({x:p.x-200,y:p.y-300});target.hitTestPoint=(x,y)=>x>=210&&x<=310&&y>=320&&y<=360;
++ target.dispatchEvent=event=>{event.stageX=event.localX+200;event.stageY=event.localY+300;events.push(event);};
++ return {u,scope,target,messages,events,lookups,extension};
++}
++test('one native right CLICK is dispatched with no down/up, left click or bubbling',()=>{const f=fixture();assert.equal(f.u.A11yTryRightClick(),true);assert.equal(f.events.length,1);const e=f.events[0];assert.equal(e.type,'click');assert.equal(e.buttonIdx,1);assert.equal(e.bubbles,false);assert.equal(e.stageX,260);assert.equal(e.stageY,340);assert.equal(f.u.mA11yActivating,false);assert(f.lookups.every(x=>x[1]===false));assert(f.messages.some(x=>x[1].startsWith('right-click|sent|')));});
++test('native progress bar supplies click coordinates; only the owner gets an event',()=>{const f=fixture('ProgressBarCheatExtension'),bar=f.target.add(new MovieClip('mcBar'));f.extension.mcProgressBar=bar;bar.getBounds=()=>({x:0,y:0,width:80,height:12});bar.localToGlobal=p=>({x:p.x+220,y:p.y+320});bar.hitTestPoint=()=>true;bar.dispatchEvent=()=>{throw Error('Do not trigger the second bar listener');};assert.equal(f.u.A11yTryRightClick(),true);assert.equal(f.events.length,1);assert.equal(f.events[0].stageX,260);assert.equal(f.events[0].stageY,326);});
++test('missing UI Cheats class refuses without constructing extensions or clicking',()=>{const f=fixture();runtime.getDefinitionByName=()=>{throw Error('not installed');};assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);assert.equal(f.lookups.length,0);});
++test('unsupported control does not acquire a cheat extension',()=>{const f=fixture();f.target.GetExtension=(c,create)=>{assert.equal(create,false);return null;};assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++for(const [name,change] of [['keyboard off',f=>f.u.mA11yKeyboard=false],['expired lease',f=>f.u.mA11yKeyboardLease=1],['startup',f=>f.u.mA11yStartupActive=true],['Build Mode',f=>f.u.A11yWorldHudMode=()=>2],['typing',f=>f.u.A11yEditing=()=>true],['pending scope',f=>f.u.mA11yPendingScope=new MovieClip()],['pending grid navigation',f=>f.u.mA11yIdxDir=1],['hidden target',f=>f.target.visible=false],['hidden ancestor',f=>f.scope.visible=false],['disabled owner',f=>f.target.enabled=false],['mouse-disabled owner',f=>f.target.mouseEnabled=false],['different scope',f=>f.u.mA11yScope=new MovieClip()],['covering modal',f=>f.u.mA11yActiveModalRoot=new MovieClip()]])test(name+' refuses safely',()=>{const f=fixture();change(f);assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('modal refresh occurs before selecting a target',()=>{const f=fixture();f.u.A11yModalFrame=()=>{f.u.mA11yFocused=null;};assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('progress bar must belong to its owner and have a native ID',()=>{const f=fixture('ProgressBarCheatExtension');f.extension.mcProgressBar=new MovieClip('unrelated');assert.equal(f.u.A11yTryRightClick(),false);const bar=f.target.add(new MovieClip('mcBar'));f.extension.mcProgressBar=bar;f.extension.mID='';assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('hidden and off-stage progress bars refuse',()=>{const f=fixture('ProgressBarCheatExtension'),bar=f.target.add(new MovieClip('mcBar'));f.extension.mcProgressBar=bar;bar.visible=false;assert.equal(f.u.A11yTryRightClick(),false);bar.visible=true;f.u.A11yIntersectsStage=()=>false;assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('invalid geometry refuses before event dispatch',()=>{const f=fixture();f.target.getBounds=()=>({x:0,y:0,width:0,height:5});assert.equal(f.u.A11yTryRightClick(),false);f.target.getBounds=()=>({x:0,y:0,width:10,height:10});f.target.localToGlobal=()=>({x:NaN,y:10});assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('an existing ancestor extension is used once without bubbling',()=>{const f=fixture();const label=f.target.add(new TextField('label','Native value'));f.u.mA11yFocused=label;assert.equal(f.u.A11yTryRightClick(),true);assert.equal(f.events.length,1);assert.equal(f.events[0].bubbles,false);});
++test('lookup never crosses the owned scope',()=>{const f=fixture();f.u.mA11yScope=f.target;f.target.GetExtension=()=>null;f.scope.GetExtension=()=>{throw Error('Do not inspect outside scope');};assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('failed extended event construction cannot fall back to a left click',()=>{const f=fixture();const saved=runtime.MouseEventEx;runtime.MouseEventEx=function(){throw Error('unavailable');};assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);runtime.MouseEventEx=saved;});
++test('dispatcher errors reset activation state and report unavailable',()=>{const f=fixture();f.target.dispatchEvent=()=>{throw Error('unloaded');};f.u.A11yMsgRightClick();assert.equal(f.u.mA11yActivating,false);assert(f.messages.some(x=>x[1]==='right-click|blocked'));assert(f.messages.some(x=>x[0]==='a11y.widget_enc'));});
++test('invalid inverse transform refuses',()=>{const f=fixture();f.target.globalToLocal=()=>({x:NaN,y:1});assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('off-stage hit point refuses',()=>{const f=fixture();f.target.localToGlobal=()=>({x:2000,y:340});f.target.hitTestPoint=()=>true;assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('empty native cheat type refuses',()=>{const f=fixture();f.extension.cheatType='';assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++test('currency listener uses the focused child receiver, once',()=>{const f=fixture('MoneyAndBucksCheatsExtension'),label=f.target.add(new MovieClip('currency'));f.u.mA11yFocused=label;label.hasEventListener=type=>type==='click';Object.assign(label,{getBounds:f.target.getBounds,localToGlobal:f.target.localToGlobal,globalToLocal:f.target.globalToLocal,hitTestPoint:f.target.hitTestPoint,dispatchEvent:f.target.dispatchEvent});f.target.hasEventListener=()=>true;f.target.dispatchEvent=()=>{throw Error('Do not dispatch again to parent');};assert.equal(f.u.A11yTryRightClick(),true);assert.equal(f.events.length,1);assert.equal(f.events[0].bubbles,false);});
++test('milestone setup without a click receiver refuses',()=>{const f=fixture('MilestonesCheatsExtension');f.target.hasEventListener=()=>false;assert.equal(f.u.A11yTryRightClick(),false);assert.equal(f.events.length,0);});
++console.log(passed+' native right-click checks passed (not live-game verification).');
++`;
++vm.runInNewContext(head+checks,{require,console,__dirname},{filename:"rightclick-fixtures"});
+diff --git a/tools/test_ui_rightclick_queue.py b/tools/test_ui_rightclick_queue.py
+new file mode 100644
+index 0000000..0f03b12
+--- /dev/null
++++ b/tools/test_ui_rightclick_queue.py
+@@ -0,0 +1,19 @@
++"""The unbound right-click message uses the existing activation epoch fence."""
++import unittest
++from unittest.mock import patch
++import test_scanner_v5 as env
++keys=env.keys
++class RightClickQueueTests(unittest.TestCase):
++ def setUp(self):
++  keys._input_epoch=0
++  env.queue.clear();env.messages.clear()
++ def test_explicit_request_uses_current_epoch(self):
++  keys._send('A11yRightClick');env.drain()
++  self.assertEqual(env.messages,['A11yRightClick'])
++ def test_changed_owner_drops_queued_request(self):
++  keys._send('A11yRightClick');keys._input_epoch+=1;env.drain()
++  self.assertEqual(env.messages,[])
++ def test_ordinary_activation_unchanged(self):
++  keys._send('A11yActivate');env.drain()
++  self.assertEqual(env.messages,['A11yActivate'])
++if __name__=='__main__':unittest.main()
 diff --git a/tools/test_uicheats_purchase.js b/tools/test_uicheats_purchase.js
 new file mode 100644
 index 0000000..8d7aeb2

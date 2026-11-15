@@ -1,4 +1,4 @@
-# Cumulative contribution changelog — 14 November 2026
+# Cumulative contribution changelog — 15 November 2026
 
 This test build combines upstream adb868c (12 November, game 1.129.39.1030) with the later contribution work below. It includes standard TS4 Access and the matching UI Cheats 1.59.1 compatibility package.
 
@@ -64,6 +64,22 @@ Scanner distance/scope selection, furniture movement, wall-side and height suppo
 - Keep pipe writes outside the lifecycle lock so a blocked write cannot prevent cleanup. Register normal-exit cleanup where available; kernel ownership also covers abrupt termination.
 - Bound the separate optional setup-helper PowerShell startup check to five seconds, with an explicit skip when unavailable; actual helper test failures remain failures.
 
+## Further native UI audit — 15 November
+
+- Restaurant menus: retain readable course headings and expose individual dishes and existing Remove controls on menu items.
+- Clubs and business rules: retain each native add/edit row and expose its visible Remove button.
+- Small-business employees: expose salary/fire controls with employee-name context.
+- Restaurant/vet settings: reach real buttons inside warning wrappers; announce the native label beside management dropdowns and employee outfit controls.
+- Jewelry crafting: stop reading hidden material-selection prompts or stale selected-material text alongside the current state.
+- Audit twelve additional screen families; record specific deferred restaurant-order, collection-tooltip and status-reading work separately for later testing.
+
+## UI Cheats focused right-click support
+
+- Add an explicit right-click action for focused UI controls; no shortcut is assigned yet.
+- Use existing attached cheat extensions and correct need-bar hit coordinates. Dispatch one native right-button click, with no left-click/down/up fallback or duplicate bar/container delivery.
+- Refuse stale, hidden, disabled, out-of-scope or invalid targets, text entry and pending navigation. Queue the action through the existing input-epoch fence.
+- Preserve UI Cheats' own dialogs/actions and add sent/blocked diagnostics. World/scanner object controls are unchanged.
+
 ## Validation
 
-The latest run has 131 passing suites, zero failed suites and one optional setup-helper suite skipped; source inputs remained stable. Ten speech-lifecycle tests include real Windows normal-parent-exit and forced-parent-termination checks, plus blocked-pipe cleanup. All 43 existing speech-mode checks also passed against the compiled script. UI fidelity evidence accompanies the retained matching UI build. Added or repaired game UI/build flows still require in-game testing; this changelog records implemented behavior, not a claim that every flow has been confirmed live.
+The latest run has 134 passing suites, zero failed suites and one optional setup-helper suite skipped; source inputs remained stable. Eighteen additional native-UI checks and 33 right-click/queue checks pass. Ten speech-lifecycle tests include real Windows normal-parent-exit and forced-parent-termination checks, plus blocked-pipe cleanup. All 43 existing speech-mode checks also passed against the compiled script. UI fidelity, structure and shared-handler evidence accompany both matching rebuilt UI packages. Added or repaired game UI/build flows still require in-game testing; this changelog records implemented behavior, not a claim that every flow has been confirmed live.

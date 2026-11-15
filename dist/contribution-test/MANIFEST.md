@@ -1,11 +1,9 @@
 # Developer manifest
 
-Base: upstream adb868c. CHANGES.patch contains the remaining local differences.
+Base: upstream adb868c. CHANGES.patch is cumulative and reverse-checked; changed-source contains only differing sources. SOURCE-MANIFEST.json records hashes/deletions.
 
-- Scripts/tyjokr_a11y_extensions.py: one queued startup for remaining local helpers. Old contrib/settings bootstrap modules and duplicate wall/layer/surface sources are removed.
-- Scripts/tyjokr_a11y_layers.py, grid.py and place.py: attached-content focus and explicit surface targeting use native slot validation and the original placement/payment transaction.
-- Scripts/tyjokr_a11y_rooms.py and room_bridge.py: custom labels take priority over cached inferred Plus room names; the bridge no longer patches grid functions.
-- Scripts/tyjokr_a11y_settings.py and menu.py: chair-hint toggle and legacy-key migration alongside upstream settings.
-- flash/TooltipManager_patched.as: scenario group/card traversal and narration; native apartment-marker focus/activation; rental region/building traversal. Earlier local UI repairs are retained.
-- flash/extra-classes/PlexLotSelectOverlay.as: two helpers map the exact native clip to its lot data and call the existing validated selection handler. rebuild_all.ps1 adds this class to the existing GameEntryDock movie.
-- Remaining house, basement, coordinate, roof, detached-building, lot-grid, chair, cleaning, away-action and event-goal modules retain their individual source files and tests.
+15 November UI changes: flash/TooltipManager_patched.as, A11yCollectFocusables around 5205 (native child actions), A11yCompositeRow 6876 (restaurant courses/warning wrappers), A11yOptionsRowLabel 6471 (business labels/employee context), A11yTextDecoration 6760 (jewelry branches). Tests: tools/test_proactive_ui_native.js. Native findings/deferred cases: changed-source/docs/development/audits/proactive-ui-20261115.md.
+
+Earlier work is grouped in changed-source/contrib-reference/docs/DEVELOPER-MANIFEST.md. TooltipManager_patched.as adds A11yRightClickOwner around 8132, A11yTryRightClick 8196 and A11yMsgRightClick 8246; its existing stage hook registers the message. keys.py _send around 662 adds A11yRightClick to the existing activation-epoch fence. No shortcut is assigned. The other 68 compiled entries are byte-identical to the preceding script. Both UI packages are rebuilt together. This candidate has not been installed into the game.
+
+The complete changed-source tree and validation evidence are in ../developer-test-20261115. BUILD-HASHES.json identifies this candidate; other feature-specific *-HASHES reports are historical snapshots.

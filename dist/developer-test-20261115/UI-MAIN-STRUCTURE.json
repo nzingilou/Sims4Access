@@ -1,0 +1,180 @@
+{
+  "movies": [
+    {
+      "movie": "TimeControls",
+      "class_count": 764,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "a0ccb7abc80671f70560b9e26c18eae2bb64047387d56d4bb6eeb13e656d6c93",
+      "output_sha256": "8971c7c72a1d7b04ec7d8d08eecfdfdf17302ea17d09f0e26f0b4f7d2c41a977"
+    },
+    {
+      "movie": "ClassLibraryScaleform",
+      "class_count": 723,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "315a37871b66fc492b7c728b8dd1b6d64aa1fe9b81cccc4f047e79e8fcae65d0",
+      "output_sha256": "f155f14df9fecea3c5c015d035713604f13540ca64cb87752f949ca355d1b237"
+    },
+    {
+      "movie": "ClassLibraryOlympus",
+      "class_count": 973,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "6b14b024e78bca0e85e6a52bd4e8edc5ffe3696f40badd26e1fe87d7c0b68e79",
+      "output_sha256": "c7d6ea771251be0449660cb91a400c14a9b0cdb879c09db751a6816bffecdf97"
+    },
+    {
+      "movie": "ClassLibraryGamedata",
+      "class_count": 1079,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "62c358fa2ace52df910ab71bf960bdd1a757e469c75c4aa778cb0225339b6a69",
+      "output_sha256": "0912e9ffd9ebcb930a28c3171042e1edcaa2b95f1f59a800b3931daf244314b6"
+    },
+    {
+      "movie": "ClassLibraryWidgetsShared",
+      "class_count": 1061,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "77b0f0474b8365779140ad8e4f45f72a092667f919ba193768b872ed59bae871",
+      "output_sha256": "2679dee6dc8ed246a506be9a7602b2369a7e28c8120ef3c784b4bdeff2b310e1"
+    },
+    {
+      "movie": "UIContainer",
+      "class_count": 733,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "2f4090e0c4fc715ecd8a5af8304a7432c5368983481cb482016c9279004482c5",
+      "output_sha256": "a83fa09ba6df25d4a7e820ac3157f45c992b2e67a518d60558d5fc98346b9067"
+    },
+    {
+      "movie": "BaseLibrary",
+      "class_count": 806,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "3f4ccc66ec17d0586c5d665ffd8f39f7f5cf857da41c4adbd404223411b39b77",
+      "output_sha256": "5a8f5704fc3ae251b24d2036cb8d5a650c6e4df0b92ff2517f370bad9c4d34a8"
+    },
+    {
+      "movie": "ComponentLibrary",
+      "class_count": 847,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "374553d4bb2c28ceeb47aa15d60b56177578631e60e0a59a613e1eafae66e636",
+      "output_sha256": "0525753bcff6dc44997e928c7733865da10f64fa6a9dcac1f33c815e7573515d"
+    },
+    {
+      "movie": "GUIComponentLibrary",
+      "class_count": 1024,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "f25e1a7b8dc9dfd9d84971298b4bb81eec3c543d7dcce3d92cd3900f2dba4730",
+      "output_sha256": "cdf08b074daba8b110c226d1995140151de94236d5d045ebf61263bb1eb2200e"
+    },
+    {
+      "movie": "HUDLibrary",
+      "class_count": 814,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "132dfa32ff296dfeb8fcb5a294d628a4829296dd17312450217ab693718c36a9",
+      "output_sha256": "c34fde44b21416ff282ac1edc86b0b9eabfd17353c6db728fe5d133e27b3f288"
+    },
+    {
+      "movie": "GameEntryLibrary",
+      "class_count": 786,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "b31bde716a96538cfdda97e1295316cf70ece8da2a141383d374883ed012a7a3",
+      "output_sha256": "78c37258175d5aa8dc94093744981fae6be63e7f40eafce177b421a6eb6300db"
+    },
+    {
+      "movie": "GameEntryLauncher",
+      "class_count": 920,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "3932ef20345c7e48906c82f310b541fcc6fb345fe92f445a8ec5e446d7d631d2",
+      "output_sha256": "ce59563991f8970f6b5eee5b2cd3bb81fc959fef17cc2f0d79531f353925f3ec"
+    },
+    {
+      "movie": "GameEntryDock",
+      "class_count": 815,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "2b52fe3056d50fb072aa881ed8fedccf41850b4e31ad0ca9841fd5884df681b1",
+      "output_sha256": "840e2a0d201466a8980111d64b16111cbe84a647b68ba2a47ee47f6d3fb468ca"
+    },
+    {
+      "movie": "SimInfoTray",
+      "class_count": 866,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "807087fe48d88edd022f7937757ee4a386be085ca52126a9cdaf3b1f9a3678a4",
+      "output_sha256": "a394889488008178ae8d6bbff4c1d62ac551896819a6c473e3ae8578004f01c3"
+    },
+    {
+      "movie": "SimHub",
+      "class_count": 757,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "74704825d50f6d7b7ccce0fe676456b5252971f8ef9f8378595979f309f5c1c5",
+      "output_sha256": "001952aa2c21a75b4d7308108bd540e14c3e7e5944c0888313cd547c96147a6f"
+    },
+    {
+      "movie": "SimInfoMotivePanel",
+      "class_count": 808,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "0f0ec5ab2e25e5e5cf7240ba5b4c1a9bc37a7c95225d25ad77b6e394fa48a0b9",
+      "output_sha256": "0ea70be0d08ed87f4b5a9770b55af1c4bad1db83e9402643ed8d25eb3f7269a1"
+    },
+    {
+      "movie": "InteractionQueue",
+      "class_count": 713,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "2ec84ca6568b7fe2806be92a8e8ac07b34db3308c688b1901198c9b90e8a55bb",
+      "output_sha256": "9b5cc582809b67ff97a7897ef2edbe02590fa9ae22890d36cc24d6b4c833424a"
+    },
+    {
+      "movie": "ObjectBoundElements",
+      "class_count": 786,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "ff64a99f98dc0a0e2aa3f8fa6fea7b4236706e0ee47c0e349636058da54da0a6",
+      "output_sha256": "be6f736d35f8bafe861d11a858f201b9791ee8bc4bea05add7e34f5616dd3451"
+    },
+    {
+      "movie": "Notifications",
+      "class_count": 723,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "c1ad28da05b6b6a546dbce98f661e6672d6e93461e956650f0c4cf875cbe2b3b",
+      "output_sha256": "86c758fd22682320b3f571d4a224563164d73dbe3e2cc44f1151aaa637a57eeb"
+    },
+    {
+      "movie": "Dialog",
+      "class_count": 831,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "a13f5ba8f077cd2bccd3a8ff835582b0fae2dea31fc9616e3d3317430cd34a71",
+      "output_sha256": "65d66810f806d6272b7ee5b02fe9fc92e3482a6751d254e73aa15e7a9b06229a"
+    },
+    {
+      "movie": "PieMenu",
+      "class_count": 723,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "4ed0bad8f503b03bf187e41eca04fabd08306fafb103964fde938f211061e8b4",
+      "output_sha256": "9860bf65811834d27e1ac0ed337c13834725602ce083adff04c2a5826e39d549"
+    },
+    {
+      "movie": "Pickers",
+      "class_count": 799,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "7b3432151adc87c7e15df57fb0a522663b098060e749648136c8e08003cb6312",
+      "output_sha256": "c2579986e6b85b44f1f3d6a93ca0cab27695098ded7ddd60e1fdae4ece4e8eb9"
+    },
+    {
+      "movie": "PickersPurchase",
+      "class_count": 758,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "51a004eb3d589eed92da03ec1676acbeda887a059e8a7730f0bdbb602ca65251",
+      "output_sha256": "77cb3039ee34bc2248d09fd5079ca470f646930ad0e483cdc01e3911f2ab4f2b"
+    },
+    {
+      "movie": "AgeUpPanel",
+      "class_count": 783,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "5be09d5ee1f1deb20cb7332239325a657651ec8dc85c1aa8838618fae01888ed",
+      "output_sha256": "84b62cf5c2335ad3fc2ee271c3b314741ebba9fd618a210b918f8e17fbdc4d9f"
+    },
+    {
+      "movie": "GameTray",
+      "class_count": 784,
+      "non_code_tags_unchanged": true,
+      "input_sha256": "afcaf5aa37c2377a15a15536efbfe5306c5d9a615173d3076270c716ae31c9e0",
+      "output_sha256": "5a171600ccba25377c4e2b6412f7f3131255bf733448666e712132a435f8a22c"
+    }
+  ],
+  "status": "structural checks passed; bytecode gate and live testing separate"
+}
