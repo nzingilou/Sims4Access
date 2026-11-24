@@ -435,3 +435,24 @@ table/desk is Focused, then press Enter. The preview says when a snap seat
 is available. A full or invalid seat refuses purchase.
 Accessibility settings > experimental chair snapping turns this off separately
 from chair-to-table orientation hints. No new shortcut is required.
+
+UI CHEATS RIGHT CLICK
+
+Shift+Enter: right-click the focused supported UI control in Live mode.
+Use Tab/arrows to focus a needs bar, moodlet or other UI Cheats control first.
+Ordinary Enter still activates normally. Text entry, scanner/world objects
+and Build placements are not right-click targets. UI Cheats may apply an
+action immediately, as with its normal mouse right-click.
+
+WATER AND TERRAIN ASSISTANT (EXPERIMENTAL)
+
+Alt+B > Water and terrain assistant. Square/rectangular ground-floor pools:
+turn on Accessibility settings > experimental pool construction, choose size
+(2–20 metres per side) and position, then explicitly confirm. Uses the native
+Pool Tool and household funds; requires clear, flat natural ground. Stops
+if native tool selection or the resulting pool footprint is not confirmed.
+Press Escape afterward to leave the native Pool Tool. Use a backed-up save
+for first tests. Add appropriate access and test swimming before saving.
+Read-only water/terrain discovery logs pool/curved-pool, fountain, pond and
+terrain catalogues. It does not select a tool or build. Fountain decorations
+and emitters use the ordinary catalogue and placement controls.

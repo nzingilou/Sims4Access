@@ -1364,7 +1364,10 @@ def room_worker(want, overview=False, tries=4, level=0):
 
 def _flash_reply(encoded=""):
     import tyjokr_a11y_basement as basement
-    return basement.reply(encoded)
+    result = basement.reply(encoded)
+    import tyjokr_a11y_water_tools as water
+    water.catalog_reply(encoded)
+    return result
 
 
 @core.hotkey(ord("B"), "build helper")
@@ -1381,6 +1384,8 @@ def open_menu():
     import tyjokr_a11y_house_workflow as workflow, tyjokr_a11y_detached as detached, tyjokr_a11y_basement as basement
     import tyjokr_a11y_roof_tools as roofs, tyjokr_a11y_lot_grid as lot_grid, tyjokr_a11y_house_planner as planner
     rows = [
+        ("Water and terrain assistant", "Experimental square/rectangular pools, fountain objects and read-only terrain-tool discovery.",
+         __import__('tyjokr_a11y_water_tools').open_assistant),
         ("Build my house", "Ready-made or custom layouts, stories, basement and individual room names.", workflow.open_builder),
         ("Build a detached small structure", "Shed, garage, enclosed winter garden, party house or custom one/two-room building at the current grid tile.",
          detached.open_builder),

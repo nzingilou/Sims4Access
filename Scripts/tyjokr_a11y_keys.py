@@ -672,7 +672,7 @@ def _send(message_name):
             pass
         import tyjokr_a11y_pump as pump
         posted = (pump.post(_deliver_activation, message_name, _input_epoch)
-                  if message_name in ('A11yActivate', 'A11yToggle')
+                  if message_name in ('A11yActivate', 'A11yToggle', 'A11yRightClick')
                   else pump.post(_deliver, message_name))
         if not posted:
             if message_name != 'A11y|lease':
@@ -1292,6 +1292,9 @@ def _plain_message(vk, ctrl=False, alt=False, shift=False):
         return 'A11yNeeds'
     if ctrl or alt:
         return None
+    if vk == 0x0D and shift:
+        # Explicit UI action only; never place, buy, or activate a scanner row.
+        return 'A11yRightClick' if _modal_active and not _editing_active else None
     if vk == 0x51 and _scanner_routing() and not blocking_active():
         return 'A11yScanner:cancelall' if shift else 'A11yScanner:cancelcurrent'
     if vk == 0x09 and (not _editing_active or _modal_active):

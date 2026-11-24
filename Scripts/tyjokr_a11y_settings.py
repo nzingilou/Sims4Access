@@ -38,6 +38,7 @@ DEFAULTS = {
     'chair_alignment_hints': True,
     'chair_snapping': True,
     'experimental_basement': True,  # Build helper: basements through the game's Basement tool
+    'experimental_pool_construction': False,  # Confirmed native Pool Tool only; ground-floor rectangles
     'experimental_bare_ground': True,
     'experimental_water': True,
     'experimental_ceiling': True,
@@ -86,6 +87,7 @@ _FILE_MAP = {
     ('build cursor', 'chair alignment hints'): 'chair_alignment_hints',
     ('build cursor', 'chair snapping'): 'chair_snapping',
     ('build cursor', 'basement'): 'experimental_basement',
+    ('build cursor', 'pool construction'): 'experimental_pool_construction',
     ('build cursor', 'bare ground'): 'experimental_bare_ground',
     ('build cursor', 'water'): 'experimental_water',
     ('build cursor', 'ceiling'): 'experimental_ceiling',
@@ -115,7 +117,7 @@ _BOOL_KEYS = ('numpad_navigation', 'sim_actions', 'object_names', 'keyboard',
               'scanner_mode', 'logging', 'auto_focus', 'surface_layer_focus',
               'experimental_bare_ground', 'experimental_water', 'experimental_ceiling',
               'experimental_fence', 'chair_alignment_hints', 'chair_snapping',
-              'experimental_basement')
+              'experimental_basement', 'experimental_pool_construction')
 SCANNER_RANGES = ('6 meters', '12 meters', '24 meters', '40 meters',
                   'whole lot', 'this floor', 'this room')
 
@@ -160,6 +162,8 @@ chair alignment hints = {chair_alignment_hints}
 chair snapping = {chair_snapping}
 # Experimental basements from the Build helper (Alt+B), through the game's Basement tool (on/off)
 basement = {experimental_basement}
+# Experimental rectangular pools on clear flat ground (Alt+B water assistant)
+pool construction = {experimental_pool_construction}
 # Experimental placement; the game's own placement test still decides (on/off)
 bare ground = {experimental_bare_ground}
 water = {experimental_water}
@@ -381,6 +385,7 @@ def _render(stored):
         'chair_alignment_hints': 'on' if sget('chair_alignment_hints') else 'off',
         'chair_snapping': 'on' if sget('chair_snapping') else 'off',
         'experimental_basement': 'on' if sget('experimental_basement') else 'off',
+        'experimental_pool_construction': 'on' if sget('experimental_pool_construction') else 'off',
         'experimental_bare_ground': 'on' if sget('experimental_bare_ground') else 'off',
         'experimental_water': 'on' if sget('experimental_water') else 'off',
         'experimental_ceiling': 'on' if sget('experimental_ceiling') else 'off',

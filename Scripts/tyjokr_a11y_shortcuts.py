@@ -93,6 +93,8 @@ def sections(keyboard=None, numpad=None):
             ordinary.append('{}: {}'.format(combo, lang.t(label)))
     # These modifier variants are implemented by _plain_message, not BINDINGS.
     ordinary.append(lang.t('shortcut shift tab'))
+    ordinary.append('{} + {}: {}'.format(lang.t('Shift'), lang.t('Enter'),
+                    lang.t('UI Cheats: right-click the focused control')))
     if settings.get('simplified_menus', True):
         ordinary.append(lang.t('shortcut simplified'))
     ordinary.append(lang.t('shortcut needs'))

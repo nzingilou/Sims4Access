@@ -69,6 +69,8 @@ ROWS = [
         help='dining and desk chairs: face a nearby table or focus it with 1; the game validates its native seat slot'),
     Row('experimental_basement', 'bool', 'experimental basement creation',
         help='Build helper basements use the native Basement Tool from ground level and verify the result below'),
+    Row('experimental_pool_construction', 'bool', 'experimental pool construction',
+        help='Alt+B water assistant: square or rectangular pools on clear flat ground, verified through native pool geometry'),
     Row('chair_alignment_hints', 'bool', 'chair-to-table orientation hints',
         help='for dining and desk chairs, names the nearest table or desk and facing relation'),
     Row('experimental_bare_ground', 'bool', 'experimental bare-ground placement',
