@@ -619,7 +619,7 @@ def _build_base(p):
     text = "Your house is finished. It cost {:,} simoleons, and you have {:,} left. ".format(spent, left)
     if p.stairs:
         text += ("The stairs are in the hallway. " if stairs_ok else
-                 "But I could not put in the stairs, so nobody can get upstairs yet. Send the TS4_Access_Plus.log file from the Mods folder for help. ")
+                 "One or more stair connections could not be placed. Some floors may still be inaccessible. The build log records which connections failed. ")
         text += "The game now shows the ground floor. Page Up and Page Down change floors. "
     if missed:
         text += "These doors could not be placed: {}. Use Door between two rooms in the build helper to try again. ".format(

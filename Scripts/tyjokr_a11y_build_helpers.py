@@ -134,8 +134,15 @@ def _native_floor(state, timeout=3.0):
         _floor_lock.release()
 
 
+def _send_floor_step(state, current, target, sequence):
+    if not _same_world(state) or not _grid_released():
+        return False
+    _build._send_ui('A11y|floorstep|{}|{}|{}|{}'.format(state['zone'], current, target, sequence))
+    return True
+
+
 def set_floor(level):
-    """Use BBGetLevelInfo, never camera height, to verify native floor keys."""
+    """Use EA's native floor controller and verify its authoritative reply."""
     try:
         if isinstance(level, bool) or not isinstance(level, (int, float)) or not math.isfinite(level) or int(level) != level:
             return False
@@ -162,25 +169,17 @@ def set_floor(level):
                 current = _native_floor(state)['floor']
                 if current == level: return True
                 step = 1 if current < level else -1
-                key, scan = (33, 0x49) if step > 0 else (34, 0x51)
-                if (not _build.on_main(_same_world, state) or _coordinates.window(u) != geometry
-                        or u.GetAsyncKeyState(key) & 0x8000):
-                    raise RuntimeError('Input context changed before the floor key')
-                pressed = False
-                try:
-                    u.keybd_event(key, scan, 1, 0); pressed = True
-                    time.sleep(.05)
-                finally:
-                    if pressed: u.keybd_event(key, scan, 3, 0)
+                if not _build.on_main(_send_floor_step, state, current, current + step, _floor_sequence):
+                    raise RuntimeError('The native floor step could not be dispatched')
                 actual = current
-                # Wait for one key acknowledgement; never stack unacknowledged keys.
+                # Wait for one native acknowledgement; never repeat a stale step.
                 for poll in range(30):
                     time.sleep(.1)
                     if _coordinates.window(u) != geometry or not _build.on_main(_same_world, state):
                         raise RuntimeError('Build context changed while waiting for the floor')
                     actual = _native_floor(state)['floor']
                     if actual != current: break
-                _log('floor-step', wanted=level, before=current, actual=actual, source='BBGetLevelInfo')
+                _log('floor-step', wanted=level, before=current, actual=actual, source='native ControlPanel.SetFloor')
                 if actual != current + step: return False
                 if actual == level: return True
             return False
@@ -206,11 +205,17 @@ def _stairs_for_plan(top, climb):
     planner = _planner
     transitions = getattr(_house_context, 'transitions', ())
     if planner is None or not transitions: return _original_house_stairs(top, climb)
+    state = _build.on_main(_state)
+    first_failure = None
     for stair_top, stair_climb, lower, upper in transitions:
+        if state is None or not _build.on_main(_same_world, state):
+            return 'context'
         result = planner._place_stair_at(stair_top, stair_climb, lower)
         _log('stair-transition', lower=lower, upper=upper, result=result)
-        if result is not True: return result
-    return True
+        if result is not True:
+            if first_failure is None: first_failure = result
+            if result == 'nocatalog': break
+    return True if first_failure is None else first_failure
 
 
 def install():

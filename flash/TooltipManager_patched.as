@@ -142,6 +142,7 @@ package olympus.core
       protected var mA11yPlusProducts:Array = new Array();
       protected var mA11yWallModeSaved:int = -1;
       protected var mA11yPlusListening:Boolean = false;
+      protected var mA11yFloorStepSequence:int = 0;
       // Guided New Game (2026-10-13): the step the guide is on during a new
       // family's CAS ("" waiting, "skip" not offered here, "open" a guide
       // dialog is up, "done" finished or declined), when CAS became ready,
@@ -4311,9 +4312,36 @@ package olympus.core
          this.A11yPlusReply("catend|" + serial + "|" + items.length);
       }
 
+      public function A11yStepNativeFloor(parts:Array) : void
+      {
+         try
+         {
+            this.A11yModalFrame();
+            if(parts.length != 6 || !this.mA11yKeyboard || getTimer() > this.mA11yKeyboardLease || this.mA11yStartupActive || this.A11yWorldHudMode() != 2 || this.A11yBuildBlocked()) { return; }
+            if(String(CommunicationManager.CallGameService("BBGetCurrentZoneId",null,true)) != String(parts[2])) { return; }
+            var expected:Number = Number(parts[3]);
+            var target:Number = Number(parts[4]);
+            var sequence:Number = Number(parts[5]);
+            if(!isFinite(expected) || !isFinite(target) || !isFinite(sequence) || int(expected) != expected || int(target) != target || int(sequence) != sequence || sequence <= this.mA11yFloorStepSequence || sequence > 2147483647 || Math.abs(target - expected) != 1) { return; }
+            var info:Object = CommunicationManager.CallGameService("BBGetLevelInfo",null,true);
+            if(info == null || typeof info["curLevel"] != "number" || typeof info["minLevel"] != "number" || typeof info["maxLevel"] != "number") { return; }
+            var current:Number = Number(info["curLevel"]);
+            var minimum:Number = Number(info["minLevel"]);
+            var maximum:Number = Number(info["maxLevel"]);
+            if(!isFinite(current) || !isFinite(minimum) || !isFinite(maximum) || int(current) != current || int(minimum) != minimum || int(maximum) != maximum || minimum < -64 || maximum > 64 || minimum > current || current > maximum || current != expected || target < minimum || target > maximum) { return; }
+            this.mA11yFloorStepSequence = int(sequence);
+            // Refresh the same controller cache used by EA's floor buttons,
+            // then call its existing setter. Python verifies BBGetLevelInfo.
+            CommunicationManager.SendUIMessage("BBRefreshLevelData");
+            CommunicationManager.SendUIMessage("RequestControlPanelSetFloor",{"floor":int(target)});
+         }
+         catch(e:Error) { }
+      }
+
       public function A11yHandleEncoded(param1:String) : void
       {
          var _loc2_:Array = param1.split("|");
+         if(_loc2_[1] == "floorstep") { this.A11yStepNativeFloor(_loc2_); return; }
          if(_loc2_[1] == "eventgoals" && _loc2_.length == 5) { this.A11yEventGoals(_loc2_); return; }
          if(_loc2_[1] == "lotprice" && _loc2_.length == 4)
          {

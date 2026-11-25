@@ -466,3 +466,7 @@ attempted and ruled out. Refresh after an examination. Current symptom
 activity lists only mapped native animations running now, not queued actions
 or a diagnosis. Patient interactions opens the normal game menu.
 Log patient presentation is read-only research and requires a11y.log on.
+
+POOL TOOL CHOICE
+After entering size and position, choose the game's rectangular Pool Tool,
+then confirm. Custom Pool Tool is for a different outline workflow.

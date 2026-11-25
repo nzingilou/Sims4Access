@@ -9,7 +9,7 @@ class Tests(unittest.TestCase):
   self.floor=0;self.events=[];self.released=False;self.geometry=(1,0,0,1920,1080,96);self.modifier=False;self.stall=False
   self.state={'zone':1,'floor':0,'center':(10,20),'grid':True,'owner':True}
   self.build=types.SimpleNamespace(current_floor=lambda:self.floor,on_main=lambda fn,*args:fn(*args))
-  self.u=types.SimpleNamespace(GetAsyncKeyState=lambda k:0x8000 if self.modifier and k==17 else 0,keybd_event=self.key)
+  self.u=types.SimpleNamespace(GetAsyncKeyState=lambda k:0x8000 if self.modifier and k==17 else 0,keybd_event=Mock(side_effect=AssertionError('Floor keys must not be injected')))
   @contextlib.contextmanager
   def physical(u):
    self.events.append('physical-on')
@@ -18,26 +18,27 @@ class Tests(unittest.TestCase):
   def measure(*args):self.events.append('roundtrip');self.released=True
   self.coords=types.SimpleNamespace(_api=lambda:self.u,physical_context=physical,window=lambda u:self.geometry,_measure=measure)
   h._build,h._coordinates=self.build,self.coords
-  self.patches=[patch.object(h,'_native_floor',side_effect=lambda state:{'floor':self.floor,'minimum':-4,'maximum':4}),patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
+  self.patches=[patch.object(h,'_send_floor_step',side_effect=self.step),patch.object(h,'_native_floor',side_effect=lambda state:{'floor':self.floor,'minimum':-4,'maximum':4}),patch.object(h,'_state',side_effect=lambda:dict(self.state)),patch.object(h,'_same_world',return_value=True),patch.object(h,'_grid_message',side_effect=self.events.append),patch.object(h,'_grid_released',side_effect=lambda:self.released),patch.object(h,'_restore_grid',side_effect=lambda state:self.events.append('restore-grid') or True),patch.object(h,'_log'),patch.object(h.time,'sleep',return_value=None)]
   for p in self.patches:p.start();self.addCleanup(p.stop)
- def key(self,key,scan,flags,extra):
-  self.events.append(('key',key,scan,flags))
-  if flags==3 and not self.stall:self.floor += 1 if key==33 else -1
- def test_grid_releases_before_native_key_and_is_restored(self):
+ def step(self,state,current,target,sequence):
+  self.events.append(('native-step',current,target,sequence))
+  if not self.stall:self.floor=target
+  return True
+ def test_grid_releases_before_native_step_and_is_restored(self):
   self.assertTrue(h.set_floor(1));self.assertEqual(self.floor,1)
   self.assertLess(self.events.index('A11yBuildGridOff'),self.events.index('roundtrip'))
-  self.assertLess(self.events.index('roundtrip'),self.events.index(('key',33,0x49,1)))
+  self.assertLess(self.events.index('roundtrip'),next(i for i,x in enumerate(self.events) if isinstance(x,tuple) and x[0]=='native-step'))
   self.assertEqual(self.events[-1],'restore-grid');self.assertIn('physical-restored',self.events)
  def test_downward_and_multiple_levels_follow_native_report(self):
   self.floor=2;self.state['floor']=2
   self.assertTrue(h.set_floor(-1));self.assertEqual(self.floor,-1)
-  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),3)
+  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[0]=='native-step']),3)
  def test_already_on_floor_emits_no_input_or_grid_messages(self):
   self.assertTrue(h.set_floor(0));self.assertEqual(self.events,[])
  def test_inactive_grid_is_not_reenabled(self):
   self.state.update(grid=False,owner=False);self.released=True
   self.assertTrue(h.set_floor(1));self.assertNotIn('restore-grid',self.events);self.assertNotIn('A11yBuildGridOff',self.events)
- def test_no_key_before_native_ack(self):
+ def test_no_step_before_grid_release_ack(self):
   self.coords._measure=lambda *a:self.events.append('roundtrip')
   with patch.object(h.time,'monotonic',side_effect=[0,3]):self.assertFalse(h.set_floor(1))
   self.assertFalse(any(isinstance(x,tuple) for x in self.events));self.assertIn('restore-grid',self.events)
@@ -46,12 +47,12 @@ class Tests(unittest.TestCase):
   self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
  def test_modifier_keys_are_never_borrowed(self):
   self.modifier=True;self.assertFalse(h.set_floor(1));self.assertFalse(any(isinstance(x,tuple) for x in self.events))
- def test_floor_boundary_stops_without_repeating_unacknowledged_key(self):
+ def test_floor_boundary_stops_without_repeating_unacknowledged_step(self):
   self.stall=True;self.assertFalse(h.set_floor(1))
-  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
- def test_key_up_survives_failure_after_key_down(self):
+  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[0]=='native-step']),1)
+ def test_context_restores_after_step_wait_fails(self):
   h.time.sleep.side_effect=RuntimeError('interrupted')
-  self.assertFalse(h.set_floor(1));self.assertIn(('key',33,0x49,3),self.events);self.assertIn('restore-grid',self.events)
+  self.assertFalse(h.set_floor(1));self.u.keybd_event.assert_not_called();self.assertIn('restore-grid',self.events)
  def test_invalid_floor_requests_are_safe(self):
   for value in [True,1.5,float('nan'),float('inf'),10**1000,'1',None]:self.assertFalse(h.set_floor(value))
   self.assertEqual(self.events,[])
@@ -67,14 +68,12 @@ class Tests(unittest.TestCase):
  def test_out_of_native_bounds_never_sends_input(self):
   h._native_floor.side_effect=lambda state:{'floor':0,'minimum':0,'maximum':3}
   self.assertFalse(h.set_floor(-1));self.assertEqual(self.events,[])
- def test_unexpected_native_jump_stops_before_another_key(self):
-  original=self.u.keybd_event
-  def jump(key,scan,flags,extra):
-   original(key,scan,flags,extra)
-   if flags==3:self.floor=2
-  self.u.keybd_event=jump
+ def test_unexpected_native_jump_stops_before_another_step(self):
+  def jump(state,current,target,sequence):
+   self.step(state,current,target,sequence);self.floor=2;return True
+  h._send_floor_step.side_effect=jump
   self.assertFalse(h.set_floor(1))
-  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[-1]==1]),1)
+  self.assertEqual(len([x for x in self.events if isinstance(x,tuple) and x[0]=='native-step']),1)
  def test_stair_plan_cleanup_after_early_failure(self):
   planner=types.SimpleNamespace(_pending_stairs=['stale basement'])
   plan=types.SimpleNamespace(_a11y_transitions=[('new',0,1)])
@@ -127,11 +126,28 @@ class TransportTests(unittest.TestCase):
  def test_plan_stairs_use_thread_local_plan_not_global_pending(self):
   planner=types.SimpleNamespace(_pending_stairs=['stale'],_original_stairs=Mock(return_value=True),_place_stair_at=Mock(return_value=True))
   h._house_context.transitions=(((3,4),(1,0),0,1),)
-  with patch.object(h,'_planner',planner),patch.object(h,'_original_house_stairs',planner._original_stairs),patch.object(h,'_log'):
+  with patch.object(h,'_state',return_value={'zone':9}),patch.object(h,'_planner',planner),patch.object(h,'_original_house_stairs',planner._original_stairs),patch.object(h,'_log'):
    self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
    planner._place_stair_at.assert_called_once_with((3,4),(1,0),0)
    planner._original_stairs.assert_not_called()
    h._house_context.transitions=()
    self.assertTrue(h._stairs_for_plan((0,0),(0,1)))
    planner._original_stairs.assert_called_once_with((0,0),(0,1))
+ def test_failed_basement_does_not_skip_independent_upper_stairs(self):
+  planner=types.SimpleNamespace(_place_stair_at=Mock(side_effect=['nofloor',True]))
+  h._house_context.transitions=(((3,4),(1,0),-1,0),((3,4),(1,0),0,1))
+  with patch.object(h,'_state',return_value={'zone':9}),patch.object(h,'_planner',planner),patch.object(h,'_log'):
+   self.assertEqual(h._stairs_for_plan((0,0),(0,1)),'nofloor')
+   self.assertEqual(planner._place_stair_at.call_count,2)
+ def test_context_change_stops_remaining_stair_transitions(self):
+  planner=types.SimpleNamespace(_place_stair_at=Mock(return_value='nofloor'))
+  h._house_context.transitions=(((3,4),(1,0),-1,0),((3,4),(1,0),0,1))
+  with patch.object(h,'_state',return_value={'zone':9}),patch.object(h,'_planner',planner),patch.object(h,'_log'),patch.object(h,'_same_world',side_effect=[True,False]):
+   self.assertEqual(h._stairs_for_plan((0,0),(0,1)),'context')
+   self.assertEqual(planner._place_stair_at.call_count,1)
+ def test_native_step_message_keeps_exact_zone_and_captured_floor_sequence(self):
+  h._build._send_ui=Mock()
+  with patch.object(h,'_grid_released',return_value=True):
+   self.assertTrue(h._send_floor_step({'zone':18446744073709551600},1,0,12))
+  h._build._send_ui.assert_called_once_with('A11y|floorstep|18446744073709551600|1|0|12')
 if __name__=='__main__':unittest.main()

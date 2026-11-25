@@ -169,5 +169,32 @@ class PoolTests(unittest.TestCase):
         for forbidden in ['bb.moveobjects','modify_funds','motherlode','set_terrain_height','_buildbuy.']:
             self.assertNotIn(forbidden,src)
 
+    def test_two_native_tools_work_only_with_an_explicit_revalidated_choice(self):
+        entries=[('Pool Tool',300,1),('Custom Pool Tool',300,1)]
+        self.build.fetch_catalog.return_value=entries
+        choice={'entries':tuple(entries),'index':0,'state':self.state}
+        self.build.select_item.side_effect=lambda index,name:water.catalog_reply('selected|{}|{}'.format(index,name))
+        self.assertTrue(REAL_SELECT_TOOL(self.state,choice))
+        self.build.select_item.assert_called_once_with(0,'Pool Tool')
+
+    def test_reordered_changed_or_invalid_tool_choices_never_select(self):
+        entries=[('Pool Tool',300,1),('Custom Pool Tool',300,1)]
+        choice={'entries':tuple(entries),'index':0,'state':self.state}
+        for changed in [list(reversed(entries)),[('Unrelated tool',300,1)],[]]:
+            self.build.fetch_catalog.return_value=changed
+            self.assertFalse(REAL_SELECT_TOOL(self.state,choice))
+        for index in [-1,2,True,None]:
+            self.assertFalse(water._same_choice(dict(choice,index=index),entries))
+        self.build.select_item.assert_not_called()
+
+    def test_explicit_choice_still_requires_confirmation_before_drawing(self):
+        choice={'entries':(('Pool Tool',300,1),('Custom Pool Tool',300,1)),'index':0,'state':self.state}
+        self.core.choose=Mock()
+        with patch.object(water,'_start') as start:
+            water._confirm_pool(self.box,choice)
+            callback=self.core.choose.call_args[0][3]
+            callback(False);start.assert_not_called()
+            callback(True);start.assert_called_once_with(self.box,choice)
+
 
 if __name__=='__main__':unittest.main()

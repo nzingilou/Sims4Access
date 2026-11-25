@@ -480,7 +480,20 @@ def _find_handle(sx, sy, radius=40):
     """Screen point of the white handle nearest to (sx, sy), or None."""
     x0, y0 = int(sx - radius), int(sy - radius)
     w = h = 2 * radius
-    data = _grab_screen(x0, y0, w, h)
+    import tyjokr_a11y_build_coordinates as coordinates
+    u = coordinates._api()
+    # Projections and pointer movement use physical pixels. GDI capture must
+    # use that same per-monitor context, especially at Windows scaling 200%.
+    with coordinates.physical_context(u):
+        geometry = coordinates.window(u)
+        if not (geometry[1] <= x0 and geometry[2] <= y0
+                and x0 + w <= geometry[1] + geometry[3]
+                and y0 + h <= geometry[2] + geometry[4]):
+            core.log('roof: handle capture outside game window'); return None
+        data = _grab_screen(x0, y0, w, h)
+        if coordinates.window(u) != geometry:
+            raise RuntimeError('Game window changed during roof handle capture')
+        core.log('roof: physical handle capture center={} radius={} dpi={}'.format((sx,sy),radius,geometry[5]))
     white = []
     for y in range(h):
         row = y * w * 4
@@ -501,13 +514,21 @@ def _drag_screen(a, b):
     (ax, ay), (bx, by) = a, b
     build.move_to(ax, ay)
     time.sleep(0.4)
-    build._mouse(build.LEFT_DOWN)
-    time.sleep(0.3)
-    for i in range(1, 26):
-        build.move_to(ax + (bx - ax) * i / 25, ay + (by - ay) * i / 25)
-        time.sleep(0.03)
-    time.sleep(0.4)
-    build._mouse(build.LEFT_UP)
+    try:
+        build._mouse(build.LEFT_DOWN)
+        time.sleep(0.3)
+        for i in range(1, 26):
+            build.move_to(ax + (bx - ax) * i / 25, ay + (by - ay) * i / 25)
+            time.sleep(0.03)
+        time.sleep(0.4)
+    finally:
+        try:
+            build._mouse(build.LEFT_UP)
+        except Exception:
+            # Release our button even after losing focus/geometry; never keep
+            # dragging because the ordinary guarded input path now refuses.
+            import tyjokr_a11y_build_coordinates as coordinates
+            coordinates._api().mouse_event(build.LEFT_UP, 0, 0, 0, 0)
     time.sleep(0.6)
 
 
@@ -532,8 +553,11 @@ def _roof_camera(f, box, level=0):
 
 def _park():
     """Mouse away from the roof (hovering it shows a tooltip) and from the screen edges (they scroll)."""
-    u = build._user32()
-    build.move_to(int(u.GetSystemMetrics(0) * 0.9), int(u.GetSystemMetrics(1) * 0.85))
+    import tyjokr_a11y_build_coordinates as coordinates
+    u = coordinates._api()
+    with coordinates.physical_context(u):
+        geometry = coordinates.window(u)
+        build.move_to(geometry[1] + int(geometry[3] * 0.9), geometry[2] + int(geometry[4] * 0.85))
 
 
 def _screen_of(f, e, n, height, tries=2):
@@ -627,7 +651,7 @@ def _roof_result(res, box):
     if res == "unsure":
         return "I put the roof down and stretched it, but I could not check its size. Undo it if it sounds wrong."
     if res == "nohandle":
-        return "I put a small roof down but could not grab its handles to stretch it. Undo it and try again."
+        return "A roof was placed, but sizing stopped because a handle could not be found. Its requested size is not verified. Review or undo it before another attempt."
     if res == "nofloor":
         return "I could not switch the game to the right floor. Press Page Up or Page Down and try again."
     return "I could not get that spot on screen."

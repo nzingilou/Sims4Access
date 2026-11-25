@@ -128,7 +128,7 @@ def catalog_reply(encoded):
         _log('selection-reply-rejected', error=str(exc))
 
 
-def _select_tool(state):
+def _select_tool(state, choice=None):
     global _selection
     build, core, helpers = _modules()
     if not build.on_main(_same, state):
@@ -136,11 +136,18 @@ def _select_tool(state):
     items = build.fetch_catalog(16, POOL_TAG, 'tool') or []
     _log('native-pool-tools', entries=items, serial=build._cat['serial'])
     # This tag is EA's Pool Tool filter, not the catalogue of premade blocks.
-    # Multiple tools need explicit investigation; do not guess from a name.
-    if len(items) != 1 or not build.on_main(_same, state):
+    # Multiple tools require a user choice; never guess from a name or index.
+    index = 0
+    if choice is not None:
+        if (not _same_choice(choice, items) or not build.on_main(_same, choice['state'])):
+            return False
+        index = choice['index']
+    elif len(items) != 1:
         return False
-    name = str(items[0][0])
-    job = {'index': 0, 'name': name, 'serial': build._cat['serial'],
+    if not items or not build.on_main(_same, state):
+        return False
+    name = str(items[index][0])
+    job = {'index': index, 'name': name, 'serial': build._cat['serial'],
            'state': state, 'done': threading.Event()}
     _selection = job
     previous = build._cat.get('silent_select', False)
@@ -148,7 +155,7 @@ def _select_tool(state):
         build._cat['silent_select'] = True
         # select_item is a worker helper: it posts its own game-thread message
         # and waits briefly. Never run that wait inside the simulation pump.
-        build.select_item(0, name)
+        build.select_item(index, name)
         return job['done'].wait(2.0) and bool(build.on_main(_same, state))
     finally:
         _selection = None
@@ -170,11 +177,20 @@ def _pair(text):
     return tuple(int(p) for p in parts)
 
 
-def _draw(box):
+def _same_choice(choice, items):
+    index = choice.get('index')
+    return (isinstance(index, int) and not isinstance(index, bool)
+            and 0 <= index < len(items)
+            and choice.get('entries') == tuple(tuple(row) for row in items))
+
+
+def _draw(box, choice=None):
     build, core, helpers = _modules()
     state = build.on_main(_context)
     if state is None or not build.on_main(_same, state):
         raise RuntimeError('Pool construction is disabled or the Build context changed.')
+    if choice is not None and not build.on_main(_same, choice['state']):
+        raise RuntimeError('The pool-tool choice belongs to another Build context.')
     frame = build.on_main(build.frame)
     box = _bounds(box, frame)
     if not build.set_floor(0):
@@ -192,7 +208,8 @@ def _draw(box):
         fresh = build.on_main(_survey, box, frame)
         if fresh is None or fresh != before or build.on_main(_can_draw, box, frame, fresh) is not True:
             raise RuntimeError('The footprint changed while preparing the camera.')
-        if not _select_tool(state):
+        selected = _select_tool(state) if choice is None else _select_tool(state, choice)
+        if not selected:
             raise RuntimeError('One native Pool Tool could not be confirmed. Its catalogue entries were logged.')
         _log('drag', box=box, zone=state['zone'])
         build.drag(screen[0], screen[1])
@@ -223,7 +240,7 @@ def _can_draw(box, frame, survey):
         return False
 
 
-def _start(box):
+def _start(box, choice=None):
     build, core, helpers = _modules()
     if build._busy[0]:
         core.speak('Another build helper is working.'); return
@@ -232,7 +249,7 @@ def _start(box):
     build._busy[0] = True
     def work():
         try:
-            if _draw(box):
+            if _draw(box, choice):
                 core.post(core.speak, 'The game confirmed the rectangular pool. Press Escape to leave the Pool Tool. Add pool access and test swimming before saving.')
         except Exception as exc:
             _log('stopped', box=box, reason=str(exc))
@@ -266,11 +283,56 @@ def _ask_pool():
                 box = _bounds(box, build.frame())
             except Exception as exc:
                 core.speak(str(exc)); return
-            core.choose('Confirm experimental pool', '{} by {} metres, {} from west and {} from north. Ground floor, clear flat natural ground only. The native game tool decides cost and placement.'.format(width, depth, *values),
-                        [('Build this pool', 'May spend household funds if the game accepts the drag.', True),
-                         ('Cancel', None, False)], lambda yes: _start(box) if yes else None, tag='build')
+            _offer_pool_tools(box)
         core.ask_text('Pool position', 'Metres from the west edge, then the north edge of the lot.', '', position)
     core.ask_text('Pool size', 'Width west to east and depth north to south. Equal values make a square.', '', size)
+
+
+def _offer_pool_tools(box):
+    """Two native tools are legitimate: require an explicit, rechecked choice."""
+    build, core, helpers = _modules()
+    if build._busy[0] or not _enabled():
+        core.speak('Enable experimental pool construction and wait for other build helpers first.'); return
+    build._busy[0] = True
+    def work():
+        offer = None
+        try:
+            state = build.on_main(_context)
+            if state is None or not build.on_main(_same, state):
+                raise RuntimeError('Build context changed.')
+            items = build.fetch_catalog(16, POOL_TAG, 'tool') or []
+            if not items or not build.on_main(_same, state):
+                raise RuntimeError('No native pool tools were returned.')
+            offer = (state, tuple(tuple(row) for row in items))
+        except Exception as exc:
+            _log('tool-chooser-failed', reason=str(exc))
+            core.post(core.speak, 'Pool tools are unavailable. ' + str(exc))
+        finally:
+            build._busy[0] = False
+        if offer is not None:
+            state, entries = offer
+            rows = [(row[0], 'Choose the rectangular Pool Tool for a single drag; the custom outline tool uses a different workflow.', index)
+                    for index, row in enumerate(entries)]
+            core.post(core.choose, 'Choose native pool tool',
+                      'The game has more than one pool tool. Choose the rectangular tool, then confirm the size and cost.',
+                      rows, lambda index: _confirm_pool(box, {'state': state, 'entries': entries, 'index': index}), 'build')
+    try:
+        threading.Thread(target=work, name='a11y_pool_tools', daemon=True).start()
+    except Exception:
+        build._busy[0] = False
+        raise
+
+
+def _confirm_pool(box, choice):
+    build, core, helpers = _modules()
+    if not _same(choice['state']) or not _same_choice(choice, choice['entries']):
+        core.speak('The pool-tool choice expired. Open the pool assistant again.'); return
+    name = choice['entries'][choice['index']][0]
+    core.choose('Confirm experimental pool',
+                '{}: {} by {} metres, {} from west and {} from north. Clear flat natural ground; the game decides cost and placement.'.format(
+                    name, box[2]-box[0], box[3]-box[1], box[0], box[1]),
+                [('Build this pool', 'May spend household funds if the game accepts the drag.', True),
+                 ('Cancel', None, False)], lambda yes: _start(box, choice) if yes else None, tag='build')
 
 
 def _diagnostics():
