@@ -456,3 +456,13 @@ for first tests. Add appropriate access and test swimming before saving.
 Read-only water/terrain discovery logs pool/curved-pool, fountain, pond and
 terrain catalogues. It does not select a tool or build. Fountain decorations
 and emitters use the ordinary catalogue and placement controls.
+
+DOCTOR PATIENT FINDINGS (GET TO WORK)
+
+Accessibility menu > Doctor patients, or a11y.patients in the cheat console.
+Select the Sim attending the active hospital workday. Choose a patient to
+read status, discovered symptoms/diagnosis, examinations recorded, treatments
+attempted and ruled out. Refresh after an examination. Current symptom
+activity lists only mapped native animations running now, not queued actions
+or a diagnosis. Patient interactions opens the normal game menu.
+Log patient presentation is read-only research and requires a11y.log on.

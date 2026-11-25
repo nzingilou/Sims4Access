@@ -864,6 +864,7 @@ def open_hub():
 
     import tyjokr_a11y_simology as simology
     import tyjokr_a11y_business as business
+    import tyjokr_a11y_doctor as doctor
 
     pack_rows = ()
     if simology.milestones_available():
@@ -903,6 +904,8 @@ def open_hub():
     )
     other = (('waiting call or text', phone.open_waiting),
              ('photography controls', panels['photography controls']))
+    if doctor.available():
+        other += (('Doctor patients', doctor.open_patients),)
     if phone.simplified():
         other += (('phone', phone.open_list),)
     other += (('keyboard shortcuts', scanner_help), ('settings menu', menu._show_settings_window))
@@ -928,3 +931,9 @@ def a11y_household(_connection=None):
 @sims4.commands.Command('a11y.funds', command_type=sims4.commands.CommandType.Live)
 def a11y_funds(_connection=None):
     return funds()
+
+
+@sims4.commands.Command('a11y.patients', command_type=sims4.commands.CommandType.Live)
+def a11y_patients(_connection=None):
+    import tyjokr_a11y_doctor as doctor
+    return doctor.open_patients()

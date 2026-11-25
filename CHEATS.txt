@@ -47,3 +47,6 @@ a11y.scan rescan: Refresh the scanner.
 
 Settings commands save your preferences. Updating the mod preserves your
 settings file; the release ZIP does not replace it.
+
+a11y.patients
+  Get to Work: open known hospital patient findings for the active working Sim.
